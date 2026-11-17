@@ -169,7 +169,7 @@ The `$match` uses the `_id` index. Both lookups use `{ author: 1, _id: -1 }`. Th
 
 - Passwords are hashed with bcrypt (cost 12) in a pre-save hook and are never returned (`select: false` plus a `toJSON` transform). They must be 8 to 72 bytes, because bcrypt ignores anything after 72 bytes.
 - Login returns the same error and takes the same time for an unknown email and a wrong password. An unknown email is still checked against a dummy hash, so response time doesn't reveal which emails exist.
-- Rate limits: 10 failed logins per IP per 15 minutes, and 30 registrations per IP per hour (`express-rate-limit`). Behind a reverse proxy, set Express `trust proxy` so the limit applies to the real client IP.
+- Rate limits: 10 failed logins per IP per 15 minutes, and 30 registrations per IP per hour (`express-rate-limit`). Behind proxies, set `TRUST_PROXY` to how many there are (`2` on Render behind the Vercel `/api` proxy), so the limit counts each real visitor. With the default `0`, every request through a proxy would share one IP. Requests sent straight to the Render URL can fake a forwarded IP and get around the limit, because the free plan can't restrict who reaches Render directly.
 
 **HTTP**
 

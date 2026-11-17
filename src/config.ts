@@ -16,6 +16,9 @@ const envSchema = z.object({
   REFRESH_TOKEN_DAYS: z.coerce.number().int().min(1).default(7),
   // the frontend origin allowed to call the API from the browser
   CLIENT_URL: z.url().default('http://localhost:5173'),
+  // number of proxies in front of the app (e.g. 2 for Vercel rewrite -> Render), so req.ip and the
+  // login rate limit see the real visitor. 0 = no proxy: trusting too many would let clients fake their IP.
+  TRUST_PROXY: z.coerce.number().int().min(0).default(0),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent']).default('info'),
   // optional: an admin account that is (re)created on every startup, for reviewers to log in with
   DEMO_ADMIN_EMAIL: z.email().optional(),
@@ -41,6 +44,7 @@ export function parseEnv(env: NodeJS.ProcessEnv) {
     refreshTokenDays: vars.REFRESH_TOKEN_DAYS,
     clientUrl: vars.CLIENT_URL,
     logLevel: vars.LOG_LEVEL,
+    trustProxy: vars.TRUST_PROXY,
     demoAdmin:
       vars.DEMO_ADMIN_EMAIL && vars.DEMO_ADMIN_PASSWORD
         ? { email: vars.DEMO_ADMIN_EMAIL, password: vars.DEMO_ADMIN_PASSWORD }

@@ -391,6 +391,9 @@ describe('config', () => {
     assert.equal(config.port, 4000);
     assert.equal(config.accessTokenExpiresIn, '15m');
     assert.equal(config.refreshTokenDays, 7);
+    assert.equal(config.trustProxy, 0, 'no proxy is trusted unless configured');
+    assert.equal(parseEnv({ ...valid, TRUST_PROXY: '2' }).trustProxy, 2);
+    assert.throws(() => parseEnv({ ...valid, TRUST_PROXY: 'true' }), /TRUST_PROXY/);
   });
 
   test('a bad value stops startup with a message naming the variable', () => {

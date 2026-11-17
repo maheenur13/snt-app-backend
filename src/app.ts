@@ -12,6 +12,7 @@ import { postsRouter } from './routes/posts.routes.js';
 import { usersRouter } from './routes/users.routes.js';
 
 export const app = express();
+app.set('trust proxy', config.trustProxy);
 
 app.use(
   pinoHttp({
