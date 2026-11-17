@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { app } from './app.js';
 import { config } from './config.js';
+import { ensureDemoAdmin } from './demo-admin.js';
 import { logger } from './logger.js';
 
 // If requests are still running after this long, exit anyway rather than hang the deploy.
@@ -8,6 +9,11 @@ const SHUTDOWN_TIMEOUT_MS = 10_000;
 
 await mongoose.connect(config.mongoUri);
 logger.info('Connected to MongoDB');
+
+if (config.demoAdmin) {
+  const result = await ensureDemoAdmin(config.demoAdmin);
+  logger.info(`Demo admin ${config.demoAdmin.email}: ${result}`);
+}
 
 const server = app.listen(config.port, () => {
   logger.info(`API listening on http://localhost:${config.port}`);

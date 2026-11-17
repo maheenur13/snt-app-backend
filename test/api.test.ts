@@ -17,6 +17,7 @@ const { Post } = await import('../src/models/Post.js');
 const { RefreshToken } = await import('../src/models/RefreshToken.js');
 const { REUSE_GRACE_MS } = await import('../src/session.js');
 const { parseEnv } = await import('../src/config.js');
+const { ensureDemoAdmin } = await import('../src/demo-admin.js');
 
 let server: Server;
 let baseUrl: string;
@@ -353,6 +354,35 @@ describe('indexes', () => {
   });
 });
 
+describe('demo admin', () => {
+  const demo = { email: 'demo.admin@example.com', password: 'demo-admin-password' };
+  const login = () => call('/auth/login', undefined, 'POST', demo);
+
+  test('is created on first run and can log in as admin', async () => {
+    assert.equal(await ensureDemoAdmin(demo), 'created');
+    const res = await login();
+    assert.equal(res.status, 200);
+    assert.equal(res.data.user.role, 'admin');
+  });
+
+  test('is left alone when nothing changed', async () => {
+    assert.equal(await ensureDemoAdmin(demo), 'unchanged');
+  });
+
+  test('gets its role and password back if a reviewer changed them', async () => {
+    const user = await User.findOne({ email: demo.email });
+    user!.role = 'user';
+    user!.password = 'someone-changed-it';
+    await user!.save();
+    assert.equal((await login()).status, 401);
+
+    assert.equal(await ensureDemoAdmin(demo), 'restored');
+    const res = await login();
+    assert.equal(res.status, 200);
+    assert.equal(res.data.user.role, 'admin');
+  });
+});
+
 describe('config', () => {
   const valid = { MONGO_URI: 'mongodb://localhost/x', JWT_SECRET: 'x'.repeat(32) };
 
@@ -369,6 +399,8 @@ describe('config', () => {
     assert.throws(() => parseEnv({ ...valid, JWT_SECRET: 'short' }), /JWT_SECRET must be at least 32/);
     assert.throws(() => parseEnv({ ...valid, LOG_LEVEL: 'verbose' }), /LOG_LEVEL/);
     assert.throws(() => parseEnv({ JWT_SECRET: valid.JWT_SECRET }), /MONGO_URI/);
+    assert.throws(() => parseEnv({ ...valid, DEMO_ADMIN_EMAIL: 'demo@example.com' }), /both DEMO_ADMIN_EMAIL/);
+    assert.equal(parseEnv(valid).demoAdmin, undefined, 'demo admin is off unless configured');
   });
 });
 

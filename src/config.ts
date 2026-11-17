@@ -17,6 +17,9 @@ const envSchema = z.object({
   // the frontend origin allowed to call the API from the browser
   CLIENT_URL: z.url().default('http://localhost:5173'),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent']).default('info'),
+  // optional: an admin account that is (re)created on every startup, for reviewers to log in with
+  DEMO_ADMIN_EMAIL: z.email().optional(),
+  DEMO_ADMIN_PASSWORD: z.string().min(8, 'must be at least 8 characters').optional(),
 });
 
 export function parseEnv(env: NodeJS.ProcessEnv) {
@@ -26,6 +29,9 @@ export function parseEnv(env: NodeJS.ProcessEnv) {
     throw new Error(`Invalid environment variables:\n${problems}`);
   }
   const vars = result.data;
+  if (Boolean(vars.DEMO_ADMIN_EMAIL) !== Boolean(vars.DEMO_ADMIN_PASSWORD)) {
+    throw new Error('Invalid environment variables:\n  set both DEMO_ADMIN_EMAIL and DEMO_ADMIN_PASSWORD, or neither');
+  }
   return {
     isProduction: vars.NODE_ENV === 'production',
     port: vars.PORT,
@@ -35,6 +41,10 @@ export function parseEnv(env: NodeJS.ProcessEnv) {
     refreshTokenDays: vars.REFRESH_TOKEN_DAYS,
     clientUrl: vars.CLIENT_URL,
     logLevel: vars.LOG_LEVEL,
+    demoAdmin:
+      vars.DEMO_ADMIN_EMAIL && vars.DEMO_ADMIN_PASSWORD
+        ? { email: vars.DEMO_ADMIN_EMAIL, password: vars.DEMO_ADMIN_PASSWORD }
+        : undefined,
   };
 }
 

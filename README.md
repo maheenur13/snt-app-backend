@@ -22,7 +22,11 @@ ACCESS_TOKEN_EXPIRES_IN=15m
 REFRESH_TOKEN_DAYS=7
 CLIENT_URL=http://localhost:5173
 LOG_LEVEL=info
+DEMO_ADMIN_EMAIL=demo.admin@example.com
+DEMO_ADMIN_PASSWORD=DemoAdmin@2026
 ```
+
+For MongoDB Atlas, use the `mongodb+srv://` string from Atlas and put the database name before the `?`: `mongodb+srv://<user>:<password>@<cluster>.mongodb.net/secure-notes?retryWrites=true&w=majority`. Without a name, everything goes into a database called `test`. Also allow your server's IP under Atlas → Network Access.
 
 `CLIENT_URL` is the frontend origin allowed by CORS. Generate a secret with `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`.
 
@@ -30,7 +34,19 @@ All variables are validated at startup (`src/config.ts`). A missing or malformed
 
 Logging uses `pino`. Each request is logged as one line with its id, method, URL, status and response time. Headers and bodies are never logged, so cookies, tokens and passwords stay out of the logs. Output is readable in development (`pino-pretty`) and JSON when `NODE_ENV=production`. Set the level with `LOG_LEVEL` (default `info`).
 
-Create the first admin (or promote an existing account), then start the server:
+### Demo admin (for reviewers)
+
+When `DEMO_ADMIN_EMAIL` and `DEMO_ADMIN_PASSWORD` are set, the server makes sure that admin exists on every startup. It creates the account if it's missing, and restores the admin role and password if someone changed them. The deployed demo uses:
+
+| Email                    | Password         |
+| ------------------------ | ---------------- |
+| `demo.admin@example.com` | `DemoAdmin@2026` |
+
+Anyone can also register a normal user account from the login page. This is a public demo account: don't store anything private in it. Leave both variables unset to turn it off.
+
+### Your own admin
+
+Create an admin (or promote an existing account), then start the server:
 
 ```bash
 pnpm create-admin admin@example.com 'StrongPassword1' 'Admin'
