@@ -6,7 +6,7 @@ export function notFound(_req: Request, res: Response) {
   res.status(404).json({ message: 'Not found' });
 }
 
-export function errorHandler(err: unknown, _req: Request, res: Response, _next: NextFunction) {
+export function errorHandler(err: unknown, req: Request, res: Response, _next: NextFunction) {
   if (err instanceof HttpError) {
     res.status(err.status).json({ message: err.message });
     return;
@@ -32,6 +32,7 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
     return;
   }
 
-  console.error(err);
+  // req.log is the request-scoped logger from pino-http, so the error line carries the request id
+  req.log.error({ err }, 'Unhandled error');
   res.status(500).json({ message: 'Internal server error' });
 }

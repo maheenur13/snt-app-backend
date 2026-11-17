@@ -5,6 +5,7 @@ import type { Server } from 'node:http';
 import { after, before, describe, test } from 'node:test';
 
 process.env.MONGO_URI = process.env.TEST_MONGO_URI ?? 'mongodb://127.0.0.1:27017/secure-notes-test';
+process.env.LOG_LEVEL ??= 'silent';
 process.env.JWT_SECRET ??= 'test-secret-that-is-at-least-32-characters-long';
 
 const { default: mongoose } = await import('mongoose');

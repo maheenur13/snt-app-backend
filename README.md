@@ -24,6 +24,8 @@ CLIENT_URL=http://localhost:5173
 
 `CLIENT_URL` is the frontend origin allowed by CORS. Generate a secret with `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`.
 
+Logging uses `pino`. Each request is logged as one line with its id, method, URL, status and response time. Headers and bodies are never logged, so cookies, tokens and passwords stay out of the logs. Output is readable in development (`pino-pretty`) and JSON when `NODE_ENV=production`. Set the level with `LOG_LEVEL` (default `info`).
+
 Create the first admin (or promote an existing account), then start the server:
 
 ```bash
