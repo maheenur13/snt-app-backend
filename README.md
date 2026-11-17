@@ -45,6 +45,8 @@ Tests: `pnpm test` runs end-to-end API tests against a real MongoDB. They use a 
 
 Code quality: `pnpm lint` (ESLint), `pnpm format` / `pnpm format:check` (Prettier). A Husky pre-commit hook runs lint-staged, which lints and formats only the staged files.
 
+Commits follow [Conventional Commits](https://www.conventionalcommits.org) (`feat(auth): ...`, `fix(notes): ...`, `docs: ...`). A Husky `commit-msg` hook runs commitlint and rejects any other format. Run `pnpm commit` for a guided prompt (commitizen with `@commitlint/cz-commitlint`, so the prompt follows the same rules).
+
 ## Roles
 
 - **user** – create, read, update and delete their own notes; edit their profile and interests; write posts.
