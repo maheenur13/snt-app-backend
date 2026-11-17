@@ -16,9 +16,11 @@ export interface Pagination {
 }
 
 const MAX_LIMIT = 100;
+// keeps skip a valid integer for MongoDB; a bigger page number would only ever be empty anyway
+const MAX_PAGE = 100_000;
 
 export function getPagination(req: Request): Pagination {
-  const page = Math.max(1, Number.parseInt(String(req.query.page), 10) || 1);
+  const page = Math.min(MAX_PAGE, Math.max(1, Number.parseInt(String(req.query.page), 10) || 1));
   const limit = Math.min(MAX_LIMIT, Math.max(1, Number.parseInt(String(req.query.limit), 10) || 10));
   return { page, limit, skip: (page - 1) * limit };
 }
