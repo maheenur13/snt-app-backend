@@ -1,10 +1,11 @@
 import { Schema, model } from 'mongoose';
+import { LIMITS } from './limits.js';
 
 const postSchema = new Schema(
   {
     author: { type: Schema.Types.ObjectId, ref: 'User', required: true },
-    title: { type: String, required: true, trim: true, maxlength: 200 },
-    body: { type: String, required: true, maxlength: 20000 },
+    title: { type: String, required: true, trim: true, maxlength: LIMITS.title },
+    body: { type: String, required: true, maxlength: LIMITS.text },
   },
   { timestamps: true },
 );

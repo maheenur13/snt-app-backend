@@ -3,23 +3,27 @@
 // - every field has a fixed type, so objects like { "$gt": "" } can't reach a MongoDB query
 // The Mongoose models keep their own rules as a last line of defense at the database level.
 import { z } from 'zod';
+import { LIMITS, passwordFitsBcrypt } from './models/limits.js';
 import { ROLES } from './models/User.js';
 
-const name = z.string().trim().min(1, 'Name is required').max(100, 'Name is too long');
-const email = z.string().trim().toLowerCase().pipe(z.email('Email is not valid').max(254, 'Email is too long'));
+const name = z.string().trim().min(1, 'Name is required').max(LIMITS.name, 'Name is too long');
+const email = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .pipe(z.email('Email is not valid').max(LIMITS.email, 'Email is too long'));
 const password = z
   .string()
-  .min(8, 'Password must be at least 8 characters')
-  // bcrypt only uses the first 72 bytes; anything longer would be silently ignored
-  .refine((v) => Buffer.byteLength(v) <= 72, 'Password must be at most 72 bytes');
+  .min(LIMITS.passwordMin, `Password must be at least ${LIMITS.passwordMin} characters`)
+  .refine(passwordFitsBcrypt, `Password must be at most ${LIMITS.passwordMaxBytes} bytes`);
 const role = z.enum(ROLES, 'Invalid role');
 // trimmed, lower-cased and de-duplicated so each user appears once per interest group
 const interests = z
-  .array(z.string().max(50, 'Interests must be at most 50 characters'))
-  .max(20, 'At most 20 interests')
+  .array(z.string().max(LIMITS.interest, `Interests must be at most ${LIMITS.interest} characters`))
+  .max(LIMITS.interests, `At most ${LIMITS.interests} interests`)
   .transform((list) => [...new Set(list.map((i) => i.trim().toLowerCase()).filter(Boolean))]);
-const title = z.string().trim().min(1, 'Title is required').max(200, 'Title is too long');
-const text = z.string().max(20000, 'Text is too long');
+const title = z.string().trim().min(1, 'Title is required').max(LIMITS.title, 'Title is too long');
+const text = z.string().max(LIMITS.text, 'Text is too long');
 
 export const registerBody = z.object({ name, email, password });
 

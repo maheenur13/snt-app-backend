@@ -1,10 +1,11 @@
 import { Schema, model } from 'mongoose';
+import { LIMITS } from './limits.js';
 
 const noteSchema = new Schema(
   {
     owner: { type: Schema.Types.ObjectId, ref: 'User', required: true },
-    title: { type: String, required: true, trim: true, maxlength: 200 },
-    content: { type: String, default: '', maxlength: 20000 },
+    title: { type: String, required: true, trim: true, maxlength: LIMITS.title },
+    content: { type: String, default: '', maxlength: LIMITS.text },
   },
   { timestamps: true },
 );
