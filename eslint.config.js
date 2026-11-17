@@ -1,0 +1,20 @@
+import js from '@eslint/js';
+import prettier from 'eslint-config-prettier';
+import globals from 'globals';
+import tseslint from 'typescript-eslint';
+
+export default tseslint.config(
+  { ignores: ['dist'] },
+  js.configs.recommended,
+  tseslint.configs.recommended,
+  {
+    languageOptions: { globals: globals.node },
+    rules: {
+      // Express 4-arg error handlers need the unused `next` parameter
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+      // used for the Express Request type augmentation
+      '@typescript-eslint/no-namespace': 'off',
+    },
+  },
+  prettier,
+);
