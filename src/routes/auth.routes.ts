@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { rateLimit } from 'express-rate-limit';
 import * as auth from '../controllers/auth.controller.js';
 
-const tooMany = { message: 'Too many attempts, please try again later' };
+const tooMany = { success: false, message: 'Too many attempts, please try again later' };
 
 // Failed logins per IP. Successful logins don't count, so a real user isn't locked out by their own use.
 const loginLimiter = rateLimit({

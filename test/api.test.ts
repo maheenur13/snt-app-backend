@@ -36,9 +36,12 @@ async function call(path: string, token?: string, method = 'GET', body?: unknown
     cookie(name)
       ?.split(';')[0]
       .slice(name.length + 1) || undefined;
+  const json = res.status === 204 ? null : await res.json();
   return {
     status: res.status,
-    data: res.status === 204 ? null : await res.json(),
+    body: json,
+    // unwrapped like the frontend does: lists become { items, ...meta }, errors keep { success, message }
+    data: json?.meta ? { items: json.data, ...json.meta } : json?.success ? json.data : json,
     headers: res.headers,
     accessCookie: cookie('accessToken'),
     refreshCookie: cookie('refreshToken'),
@@ -51,7 +54,7 @@ const refreshSession = (refresh: string) => call('/auth/refresh', undefined, 'PO
 
 async function register(name: string, email: string) {
   const res = await call('/auth/register', undefined, 'POST', { name, email, password: 'password123' });
-  return { token: res.token!, refresh: res.refresh!, id: res.data.user._id as string };
+  return { token: res.token!, refresh: res.refresh!, id: res.data._id as string };
 }
 
 before(async () => {
@@ -76,7 +79,7 @@ describe('auth', () => {
       password: 'password123',
     });
     assert.equal(status, 201);
-    assert.equal(data.user.password, undefined);
+    assert.equal(data.password, undefined);
     assert.equal(data.token, undefined, 'token only travels in the httpOnly cookie');
     const stored = await User.findOne({ email: 'ann@example.com' }).select('+password');
     assert.notEqual(stored!.password, 'password123');
@@ -89,7 +92,7 @@ describe('auth', () => {
       password: 'password123',
       role: 'admin',
     });
-    assert.equal(res.data.user.role, 'user');
+    assert.equal(res.data.role, 'user');
     const dup = await call('/auth/register', undefined, 'POST', {
       name: 'Eve',
       email: 'EVE@example.com',
@@ -112,6 +115,23 @@ describe('auth', () => {
     assert.equal((await call('/notes', 'not-a-token')).status, 401);
   });
 
+  test('every response uses the same envelope', async () => {
+    const login = await call('/auth/login', undefined, 'POST', { email: 'ann@example.com', password: 'password123' });
+    assert.deepEqual(Object.keys(login.body), ['success', 'data']);
+    assert.equal(login.body.success, true);
+    assert.equal(login.body.data.email, 'ann@example.com');
+
+    const list = await call('/notes', login.token);
+    assert.equal(list.body.success, true);
+    assert.ok(Array.isArray(list.body.data));
+    assert.deepEqual(Object.keys(list.body.meta), ['page', 'limit', 'total', 'totalPages']);
+
+    for (const failed of [await call('/notes'), await call('/nope', login.token)]) {
+      assert.deepEqual(failed.body, { success: false, message: failed.body.message });
+      assert.ok(failed.body.message);
+    }
+  });
+
   test('both auth cookies are httpOnly and SameSite=Strict', async () => {
     const res = await call('/auth/login', undefined, 'POST', { email: 'ann@example.com', password: 'password123' });
     for (const cookie of [res.accessCookie!, res.refreshCookie!]) {
@@ -119,7 +139,7 @@ describe('auth', () => {
       assert.match(cookie, /SameSite=Strict/);
     }
     assert.match(res.refreshCookie!, /Path=\/api\/auth/, 'refresh token is only sent to auth endpoints');
-    const stored = await RefreshToken.findOne({ user: res.data.user._id });
+    const stored = await RefreshToken.findOne({ user: res.data._id });
     assert.notEqual(stored!.tokenHash, res.refresh, 'only a hash is stored');
   });
 
@@ -181,7 +201,7 @@ describe('refresh tokens', () => {
     const first = await register('Rotator', 'rotator@example.com');
     const next = await refreshSession(first.refresh);
     assert.equal(next.status, 200);
-    assert.equal(next.data.user.email, 'rotator@example.com');
+    assert.equal(next.data.email, 'rotator@example.com');
     assert.ok(next.token && next.refresh);
     assert.notEqual(next.refresh, first.refresh);
     assert.equal((await call('/users/me', next.token)).status, 200);
@@ -362,7 +382,7 @@ describe('demo admin', () => {
     assert.equal(await ensureDemoAdmin(demo), 'created');
     const res = await login();
     assert.equal(res.status, 200);
-    assert.equal(res.data.user.role, 'admin');
+    assert.equal(res.data.role, 'admin');
   });
 
   test('is left alone when nothing changed', async () => {
@@ -379,7 +399,7 @@ describe('demo admin', () => {
     assert.equal(await ensureDemoAdmin(demo), 'restored');
     const res = await login();
     assert.equal(res.status, 200);
-    assert.equal(res.data.user.role, 'admin');
+    assert.equal(res.data.role, 'admin');
   });
 });
 

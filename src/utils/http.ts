@@ -1,4 +1,4 @@
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { paginationQuery } from '../validation.js';
 
 export class HttpError extends Error {
@@ -21,6 +21,25 @@ export function getPagination(req: Request): Pagination {
   return { page, limit, skip: (page - 1) * limit };
 }
 
-export function paginated<T>(items: T[], total: number, { page, limit }: Pagination) {
-  return { items, page, limit, total, totalPages: Math.ceil(total / limit) };
+// Every response uses one envelope: { success, data, meta? } on success, { success: false, message } on error.
+export function sendData(res: Response, data: unknown, status = 200) {
+  res.status(status).json({ success: true, data });
+}
+
+export function sendPage<T>(
+  res: Response,
+  items: T[],
+  total: number,
+  { page, limit }: Pagination,
+  extra?: Record<string, unknown>,
+) {
+  res.json({
+    success: true,
+    data: items,
+    meta: { page, limit, total, totalPages: Math.ceil(total / limit), ...extra },
+  });
+}
+
+export function sendError(res: Response, status: number, message: string) {
+  res.status(status).json({ success: false, message });
 }

@@ -98,17 +98,32 @@ Anyone can register; new accounts always get the `user` role. Only an admin can 
 
 Login and register set two httpOnly cookies: `accessToken`, a 15-minute access JWT, and `refreshToken`, a 7-day refresh token sent only to `/api/auth`. Every route except `/api/auth/*` needs the `accessToken` cookie. When it expires, the client calls `POST /api/auth/refresh` to get a new pair. Browsers send the cookies automatically with `credentials: 'include'`.
 
-List endpoints accept `?page=1&limit=10` (`limit` max 100). Missing or out-of-range values fall back to page 1 and 10 per page. They return:
+### Response format
 
-```json
-{ "items": [], "page": 1, "limit": 10, "total": 0, "totalPages": 0 }
+Every response uses the same envelope, built in `src/utils/http.ts`. The HTTP status code always matches `success`.
+
+```jsonc
+// a single item (note, user, post)
+{ "success": true, "data": { "_id": "...", "title": "..." } }
+
+// a list
+{ "success": true, "data": [], "meta": { "page": 1, "limit": 10, "total": 0, "totalPages": 0 } }
+
+// an error (400, 401, 403, 404, 409, 429, 500)
+{ "success": false, "message": "Note not found" }
 ```
+
+Deletes and logout return `204 No Content` with an empty body.
+
+List endpoints accept `?page=1&limit=10` (`limit` max 100). Missing or out-of-range values fall back to page 1 and 10 per page. `GET /api/users/:id/posts` also puts the author in `meta.user`.
+
+### Endpoints
 
 | Method | Path                     | Access        | Description                                         |
 | ------ | ------------------------ | ------------- | --------------------------------------------------- |
-| POST   | `/api/auth/register`     | public        | `{ name, email, password }` → `{ user }` + cookies  |
-| POST   | `/api/auth/login`        | public        | `{ email, password }` → `{ user }` + cookies        |
-| POST   | `/api/auth/refresh`      | refresh token | Rotates the refresh token → `{ user }` + cookies    |
+| POST   | `/api/auth/register`     | public        | `{ name, email, password }` → user + cookies        |
+| POST   | `/api/auth/login`        | public        | `{ email, password }` → user + cookies              |
+| POST   | `/api/auth/refresh`      | refresh token | Rotates the refresh token → user + cookies          |
 | POST   | `/api/auth/logout`       | public        | Revokes the refresh token and clears both cookies   |
 | GET    | `/api/users/me`          | user          | Own profile                                         |
 | PATCH  | `/api/users/me`          | user          | `{ name?, interests? }`                             |
@@ -126,8 +141,6 @@ List endpoints accept `?page=1&limit=10` (`limit` max 100). Missing or out-of-ra
 | GET    | `/api/users/:id`         | admin         | Single user                                         |
 | PATCH  | `/api/users/:id`         | admin         | `{ name?, email?, password?, role?, interests? }`   |
 | DELETE | `/api/users/:id`         | admin         | Delete a user with their notes, posts and sessions  |
-
-Errors come back as `{ "message": "..." }` with a matching status code (400, 401, 403, 404, 409, 429, 500).
 
 ## Indexes
 
