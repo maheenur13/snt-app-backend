@@ -47,9 +47,8 @@ notesRouter.patch('/:id', async (req, res) => {
   const note = await Note.findOne({ _id: req.params.id, owner: req.user!._id });
   if (!note) throw new HttpError(404, 'Note not found');
 
-  const title = readString(req.body, 'title');
-  if (title !== undefined) note.title = title;
-  // content may be cleared, so an empty string is a valid update here
+  // check presence, not truthiness: an empty title must reach the model's `required` rule and fail with 400
+  if (req.body?.title !== undefined) note.title = readString(req.body, 'title') ?? '';
   if (req.body?.content !== undefined) note.content = readString(req.body, 'content') ?? '';
   await note.save();
   res.json(note);
