@@ -12,7 +12,7 @@ Requirements: Node.js 22+, pnpm, and a MongoDB instance (local or Atlas).
 pnpm install
 ```
 
-Create a `.env` file in this folder:
+Copy `env.example` to `.env` and fill it in (`.env` is git-ignored and must never be committed):
 
 ```
 PORT=4000
