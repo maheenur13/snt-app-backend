@@ -12,7 +12,7 @@ if (!email || !password) {
 
 await mongoose.connect(config.mongoUri);
 
-const user = (await User.findOne({ email: email.toLowerCase() })) ?? new User({ email, name });
+const user = (await User.findOne({ email: email.trim().toLowerCase() })) ?? new User({ email, name });
 user.password = password;
 user.role = 'admin';
 await user.save();
