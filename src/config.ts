@@ -4,9 +4,12 @@ function required(name: string): string {
   return value;
 }
 
+const jwtSecret = required('JWT_SECRET');
+if (jwtSecret.length < 32) throw new Error('JWT_SECRET must be at least 32 characters');
+
 export const config = {
   port: Number(process.env.PORT ?? 4000),
   mongoUri: required('MONGO_URI'),
-  jwtSecret: required('JWT_SECRET'),
+  jwtSecret,
   jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? '1d',
 };
