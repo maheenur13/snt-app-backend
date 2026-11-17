@@ -21,6 +21,7 @@ JWT_SECRET=<random string, at least 32 characters>
 ACCESS_TOKEN_EXPIRES_IN=15m
 REFRESH_TOKEN_DAYS=7
 CLIENT_URL=http://localhost:5173
+TRUST_PROXY=0
 LOG_LEVEL=info
 DEMO_ADMIN_EMAIL=demo.admin@example.com
 DEMO_ADMIN_PASSWORD=DemoAdmin@2026
@@ -28,7 +29,7 @@ DEMO_ADMIN_PASSWORD=DemoAdmin@2026
 
 For MongoDB Atlas, use the `mongodb+srv://` string from Atlas and put the database name before the `?`: `mongodb+srv://<user>:<password>@<cluster>.mongodb.net/secure-notes?retryWrites=true&w=majority`. Without a name, everything goes into a database called `test`. Also allow your server's IP under Atlas → Network Access.
 
-`CLIENT_URL` is the frontend origin allowed by CORS. Generate a secret with `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`.
+`CLIENT_URL` is the frontend origin allowed by CORS. `TRUST_PROXY` is the number of proxies in front of the app: keep `0` locally and set `2` on Render behind the Vercel `/api` proxy (see Security). Generate a secret with `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`.
 
 All variables are validated at startup (`src/config.ts`). A missing or malformed value, like `REFRESH_TOKEN_DAYS=7d`, stops the server with a message naming the variable.
 
@@ -169,7 +170,7 @@ The `$match` uses the `_id` index. Both lookups use `{ author: 1, _id: -1 }`. Th
 
 - Passwords are hashed with bcrypt (cost 12) in a pre-save hook and are never returned (`select: false` plus a `toJSON` transform). They must be 8 to 72 bytes, because bcrypt ignores anything after 72 bytes.
 - Login returns the same error and takes the same time for an unknown email and a wrong password. An unknown email is still checked against a dummy hash, so response time doesn't reveal which emails exist.
-- Rate limits: 10 failed logins per IP per 15 minutes, and 30 registrations per IP per hour (`express-rate-limit`). Behind proxies, set `TRUST_PROXY` to how many there are (`2` on Render behind the Vercel `/api` proxy), so the limit counts each real visitor. With the default `0`, every request through a proxy would share one IP. Requests sent straight to the Render URL can fake a forwarded IP and get around the limit, because the free plan can't restrict who reaches Render directly.
+- Rate limits: 10 failed logins per IP per 15 minutes, 30 registrations per IP per hour, and 60 token refreshes per IP per 15 minutes (`express-rate-limit`). Behind proxies, set `TRUST_PROXY` to how many there are (`2` on Render behind the Vercel `/api` proxy), so the limit counts each real visitor. With the default `0`, every request through a proxy would share one IP. Requests sent straight to the Render URL can fake a forwarded IP and get around the limit, because the free plan can't restrict who reaches Render directly.
 
 **HTTP**
 
