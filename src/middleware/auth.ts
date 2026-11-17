@@ -1,7 +1,7 @@
-import type { CookieOptions, NextFunction, Request, Response } from 'express';
-import jwt from 'jsonwebtoken';
-import { config } from '../config.js';
+import type { NextFunction, Request, Response } from 'express';
+import type { JwtPayload } from 'jsonwebtoken';
 import { User, type Role, type UserDocument } from '../models/User.js';
+import { ACCESS_COOKIE, verifyAccessToken } from '../session.js';
 import { HttpError } from '../utils/http.js';
 
 declare global {
@@ -12,33 +12,13 @@ declare global {
   }
 }
 
-export const TOKEN_COOKIE = 'token';
-
-// httpOnly: page scripts can't read the token, so an XSS bug can't steal it.
-// sameSite strict: the browser never sends it on requests started by another site (CSRF).
-export const tokenCookieOptions: CookieOptions = {
-  httpOnly: true,
-  secure: config.isProduction,
-  sameSite: 'strict',
-  path: '/api',
-};
-
-export function setTokenCookie(res: Response, user: UserDocument) {
-  const token = jwt.sign({ role: user.role }, config.jwtSecret, {
-    algorithm: 'HS256',
-    subject: user.id,
-    expiresIn: config.jwtExpiresIn as jwt.SignOptions['expiresIn'],
-  });
-  res.cookie(TOKEN_COOKIE, token, tokenCookieOptions);
-}
-
 export async function authenticate(req: Request, _res: Response, next: NextFunction) {
-  const token: unknown = req.cookies?.[TOKEN_COOKIE];
+  const token: unknown = req.cookies?.[ACCESS_COOKIE];
   if (typeof token !== 'string' || !token) throw new HttpError(401, 'Authentication required');
 
-  let payload: jwt.JwtPayload;
+  let payload: JwtPayload;
   try {
-    payload = jwt.verify(token, config.jwtSecret, { algorithms: ['HS256'] }) as jwt.JwtPayload;
+    payload = verifyAccessToken(token);
   } catch {
     throw new HttpError(401, 'Invalid or expired token');
   }

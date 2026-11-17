@@ -18,8 +18,10 @@ Copy `env.example` to `.env` and fill it in (`.env` is git-ignored and must neve
 PORT=4000
 MONGO_URI=mongodb://127.0.0.1:27017/secure-notes
 JWT_SECRET=<random string, at least 32 characters>
-JWT_EXPIRES_IN=1d
+JWT_EXPIRES_IN=15m
+REFRESH_TOKEN_DAYS=7
 CLIENT_URL=http://localhost:5173
+LOG_LEVEL=info
 ```
 
 `CLIENT_URL` is the frontend origin allowed by CORS. Generate a secret with `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`.
@@ -48,7 +50,7 @@ Anyone can register; new accounts always get the `user` role. Only an admin can 
 
 ## API
 
-Login and register set the JWT in an httpOnly `token` cookie. Every route except `/api/auth/*` needs that cookie. Browsers send it automatically with `credentials: 'include'`.
+Login and register set two httpOnly cookies: `token`, a 15-minute access JWT, and `refreshToken`, a 7-day refresh token sent only to `/api/auth`. Every route except `/api/auth/*` needs the `token` cookie. When it expires, the client calls `POST /api/auth/refresh` to get a new pair. Browsers send the cookies automatically with `credentials: 'include'`.
 List endpoints accept `?page=1&limit=10` (max 100) and return:
 
 ```json
@@ -57,9 +59,10 @@ List endpoints accept `?page=1&limit=10` (max 100) and return:
 
 | Method | Path                     | Access        | Description                                         |
 | ------ | ------------------------ | ------------- | --------------------------------------------------- |
-| POST   | `/api/auth/register`     | public        | `{ name, email, password }` → `{ user }` + cookie   |
-| POST   | `/api/auth/login`        | public        | `{ email, password }` → `{ user }` + cookie         |
-| POST   | `/api/auth/logout`       | public        | Clears the cookie                                   |
+| POST   | `/api/auth/register`     | public        | `{ name, email, password }` → `{ user }` + cookies  |
+| POST   | `/api/auth/login`        | public        | `{ email, password }` → `{ user }` + cookies        |
+| POST   | `/api/auth/refresh`      | refresh token | Rotates the refresh token → `{ user }` + cookies    |
+| POST   | `/api/auth/logout`       | public        | Revokes the refresh token and clears both cookies   |
 | GET    | `/api/users/me`          | user          | Own profile                                         |
 | PATCH  | `/api/users/me`          | user          | `{ name?, interests? }`                             |
 | GET    | `/api/users/by-interest` | user          | Users grouped by interest (aggregation, scenario 1) |
@@ -83,12 +86,15 @@ Errors come back as `{ "message": "..." }` with a matching status code (400, 401
 
 Every index is declared with `schema.index()` in `src/models`. The default `_id` index is used wherever possible, and no other indexes are created.
 
-| Collection | Index                         | Used by                                                                                                |
-| ---------- | ----------------------------- | ------------------------------------------------------------------------------------------------------ |
-| users      | `{ email: 1 }` unique         | Login and register lookup; also blocks duplicate emails                                                |
-| users      | `{ interests: 1 }` (multikey) | `$match` at the start of the group-by-interest pipeline                                                |
-| notes      | `{ owner: 1, _id: -1 }`       | "My notes" list (filter by owner, newest first), its count, and cleanup when a user is deleted         |
-| posts      | `{ author: 1, _id: -1 }`      | The `$lookup` in "posts of a user" (match by author, newest first), and cleanup when a user is deleted |
+| Collection    | Index                         | Used by                                                                                                |
+| ------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------ |
+| users         | `{ email: 1 }` unique         | Login and register lookup; also blocks duplicate emails                                                |
+| users         | `{ interests: 1 }` (multikey) | `$match` at the start of the group-by-interest pipeline                                                |
+| notes         | `{ owner: 1, _id: -1 }`       | "My notes" list (filter by owner, newest first), its count, and cleanup when a user is deleted         |
+| posts         | `{ author: 1, _id: -1 }`      | The `$lookup` in "posts of a user" (match by author, newest first), and cleanup when a user is deleted |
+| refreshtokens | `{ tokenHash: 1 }` unique     | Finding the token on every refresh and logout                                                          |
+| refreshtokens | `{ user: 1 }`                 | Revoking all of a user's sessions (token reuse, password change, user deleted)                         |
+| refreshtokens | `{ expiresAt: 1 }` TTL        | MongoDB deletes expired tokens on its own, so the collection doesn't grow forever                      |
 
 Queries that only need `_id`:
 
@@ -114,11 +120,12 @@ The `$match` uses the `_id` index. Both lookups use `{ author: 1, _id: -1 }`. Th
 
 **Sessions**
 
-- The JWT is sent only in an `httpOnly`, `SameSite=Strict` cookie (`Secure` when `NODE_ENV=production`). Page scripts can't read it, so an XSS bug can't steal it. Browsers don't send it on requests started from other sites, which blocks CSRF. It never appears in a response body.
-- Tokens are signed and verified with HS256 only. Tokens with `alg: none` or another secret are rejected. `JWT_SECRET` must be at least 32 characters, or the server won't start.
-- The JWT holds only the user id and role. The user is loaded again on every request, so deleted users and role changes take effect immediately.
-- Changing a password ends every session that started before the change (`passwordChangedAt`).
-- `POST /api/auth/logout` clears the cookie.
+- Both tokens are sent only in `httpOnly`, `SameSite=Strict` cookies (`Secure` when `NODE_ENV=production`). Page scripts can't read them, so an XSS bug can't steal them. Browsers don't send them on requests started from other sites, which blocks CSRF. They never appear in a response body.
+- **Access token:** a JWT that lasts 15 minutes (`JWT_EXPIRES_IN`). It is signed and verified with HS256 only, so tokens with `alg: none` or another secret are rejected. `JWT_SECRET` must be at least 32 characters, or the server won't start. The JWT holds only the user id and role. The user is loaded again on every request, so deleted users and role changes take effect immediately.
+- **Refresh token:** 32 random bytes that last 7 days (`REFRESH_TOKEN_DAYS`). Only its SHA-256 hash is stored (`refreshtokens` collection), so a database leak doesn't give out working tokens. Its cookie is scoped to `/api/auth`, so it isn't attached to normal API calls.
+- **Rotation and reuse detection:** each refresh token works exactly once, claimed atomically with `findOneAndUpdate`. If an already-used token comes back more than 10 seconds after it was used, someone else has a copy, so every session of that user is revoked. A reuse within 10 seconds is two tabs refreshing at the same moment, so it just fails without revoking anything.
+- Changing a password ends every session that started before the change, for both access and refresh tokens (`passwordChangedAt`).
+- `POST /api/auth/logout` deletes this browser's refresh token and clears both cookies. Deleting a user deletes all their refresh tokens.
 
 **Passwords and login**
 

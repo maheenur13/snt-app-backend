@@ -1,6 +1,7 @@
 // End-to-end tests against a real MongoDB. Uses its own database, which is dropped on every run.
 // Run with: pnpm test   (override the database with TEST_MONGO_URI)
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import type { Server } from 'node:http';
 import { after, before, describe, test } from 'node:test';
 
@@ -13,36 +14,48 @@ const { app } = await import('../src/app.js');
 const { User } = await import('../src/models/User.js');
 const { Note } = await import('../src/models/Note.js');
 const { Post } = await import('../src/models/Post.js');
+const { RefreshToken } = await import('../src/models/RefreshToken.js');
+const { REUSE_GRACE_MS } = await import('../src/session.js');
 
 let server: Server;
 let baseUrl: string;
 
-// `token` is sent the way a browser would: as the auth cookie.
-async function call(path: string, token?: string, method = 'GET', body?: unknown) {
+// Cookies are sent the way a browser would. `token` is the access token; `refresh` the refresh token.
+async function call(path: string, token?: string, method = 'GET', body?: unknown, refresh?: string) {
+  const cookies = [token && `token=${token}`, refresh && `refreshToken=${refresh}`].filter(Boolean).join('; ');
   const res = await fetch(baseUrl + path, {
     method,
-    headers: { 'Content-Type': 'application/json', ...(token && { Cookie: `token=${token}` }) },
+    headers: { 'Content-Type': 'application/json', ...(cookies && { Cookie: cookies }) },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  const setCookie = res.headers.getSetCookie().find((c) => c.startsWith('token='));
+  const setCookies = res.headers.getSetCookie();
+  const cookie = (name: string) => setCookies.find((c) => c.startsWith(`${name}=`));
+  const value = (name: string) =>
+    cookie(name)
+      ?.split(';')[0]
+      .slice(name.length + 1) || undefined;
   return {
     status: res.status,
     data: res.status === 204 ? null : await res.json(),
     headers: res.headers,
-    setCookie,
-    token: setCookie?.split(';')[0].slice('token='.length),
+    setCookie: cookie('token'),
+    refreshCookie: cookie('refreshToken'),
+    token: value('token'),
+    refresh: value('refreshToken'),
   };
 }
 
+const refreshSession = (refresh: string) => call('/auth/refresh', undefined, 'POST', undefined, refresh);
+
 async function register(name: string, email: string) {
   const res = await call('/auth/register', undefined, 'POST', { name, email, password: 'password123' });
-  return { token: res.token!, id: res.data.user._id as string };
+  return { token: res.token!, refresh: res.refresh!, id: res.data.user._id as string };
 }
 
 before(async () => {
   await mongoose.connect(process.env.MONGO_URI!);
   await mongoose.connection.dropDatabase();
-  await Promise.all([User.syncIndexes(), Note.syncIndexes(), Post.syncIndexes()]);
+  await Promise.all([User.syncIndexes(), Note.syncIndexes(), Post.syncIndexes(), RefreshToken.syncIndexes()]);
   server = app.listen(0);
   const { port } = server.address() as { port: number };
   baseUrl = `http://127.0.0.1:${port}/api`;
@@ -97,10 +110,15 @@ describe('auth', () => {
     assert.equal((await call('/notes', 'not-a-token')).status, 401);
   });
 
-  test('the auth cookie is httpOnly and SameSite=Strict', async () => {
+  test('both auth cookies are httpOnly and SameSite=Strict', async () => {
     const res = await call('/auth/login', undefined, 'POST', { email: 'ann@example.com', password: 'password123' });
-    assert.match(res.setCookie!, /HttpOnly/);
-    assert.match(res.setCookie!, /SameSite=Strict/);
+    for (const cookie of [res.setCookie!, res.refreshCookie!]) {
+      assert.match(cookie, /HttpOnly/);
+      assert.match(cookie, /SameSite=Strict/);
+    }
+    assert.match(res.refreshCookie!, /Path=\/api\/auth/, 'refresh token is only sent to auth endpoints');
+    const stored = await RefreshToken.findOne({ user: res.data.user._id });
+    assert.notEqual(stored!.tokenHash, res.refresh, 'only a hash is stored');
   });
 
   test('tokens signed with another secret or algorithm are rejected', async () => {
@@ -125,10 +143,13 @@ describe('auth', () => {
     assert.equal((await call('/users/me', token, 'PATCH', { interests: tooMany })).status, 400);
   });
 
-  test('logout clears the cookie', async () => {
-    const res = await call('/auth/logout', undefined, 'POST');
+  test('logout clears the cookies and revokes the refresh token', async () => {
+    const session = await register('Leaving', 'leaving@example.com');
+    const res = await call('/auth/logout', session.token, 'POST', undefined, session.refresh);
     assert.equal(res.status, 204);
     assert.match(res.setCookie!, /Expires=Thu, 01 Jan 1970/);
+    assert.match(res.refreshCookie!, /Expires=Thu, 01 Jan 1970/);
+    assert.equal((await refreshSession(session.refresh)).status, 401);
   });
 
   test('security headers are set and CORS only allows the client origin', async () => {
@@ -148,6 +169,56 @@ describe('auth', () => {
       headers: { Origin: 'https://evil.example', 'Access-Control-Request-Method': 'GET' },
     });
     assert.notEqual(evil.headers.get('access-control-allow-origin'), 'https://evil.example');
+  });
+});
+
+describe('refresh tokens', () => {
+  const hash = (token: string) => createHash('sha256').update(token).digest('hex');
+
+  test('refresh rotates both tokens and the new access token works', async () => {
+    const first = await register('Rotator', 'rotator@example.com');
+    const next = await refreshSession(first.refresh);
+    assert.equal(next.status, 200);
+    assert.equal(next.data.user.email, 'rotator@example.com');
+    assert.ok(next.token && next.refresh);
+    assert.notEqual(next.refresh, first.refresh);
+    assert.equal((await call('/users/me', next.token)).status, 200);
+  });
+
+  test('a refresh token works once; a quick second use (two tabs) fails without revoking', async () => {
+    const first = await register('Tabs', 'tabs@example.com');
+    const next = await refreshSession(first.refresh);
+    assert.equal((await refreshSession(first.refresh)).status, 401);
+    assert.equal((await refreshSession(next.refresh!)).status, 200, 'the rotated session still works');
+  });
+
+  test('reusing an old refresh token revokes every session of that user', async () => {
+    const stolen = await register('Victim', 'refresh-victim@example.com');
+    const next = await refreshSession(stolen.refresh);
+    // pretend the rotation happened a while ago, so this is a replay and not the two-tab race
+    await RefreshToken.updateOne(
+      { tokenHash: hash(stolen.refresh) },
+      { usedAt: new Date(Date.now() - REUSE_GRACE_MS - 1000) },
+    );
+
+    assert.equal((await refreshSession(stolen.refresh)).status, 401);
+    assert.equal((await refreshSession(next.refresh!)).status, 401, 'the legitimate session is revoked too');
+    assert.equal(await RefreshToken.countDocuments({ user: stolen.id }), 0);
+  });
+
+  test('a password change invalidates older refresh tokens', async () => {
+    const session = await register('Changer', 'changer@example.com');
+    const user = await User.findById(session.id);
+    user!.password = 'a-brand-new-password';
+    await user!.save();
+    assert.equal((await refreshSession(session.refresh)).status, 401);
+  });
+
+  test('missing or unknown refresh tokens get 401 and cleared cookies', async () => {
+    assert.equal((await call('/auth/refresh', undefined, 'POST')).status, 401);
+    const unknown = await refreshSession('not-a-real-token');
+    assert.equal(unknown.status, 401);
+    assert.match(unknown.refreshCookie!, /Expires=Thu, 01 Jan 1970/);
   });
 });
 
@@ -223,6 +294,7 @@ describe('admin', () => {
     assert.equal((await call('/users/me', victim.token)).status, 401);
     assert.equal(await Note.countDocuments({ owner: victim.id }), 0);
     assert.equal(await Post.countDocuments({ author: victim.id }), 0);
+    assert.equal(await RefreshToken.countDocuments({ user: victim.id }), 0);
   });
 });
 
@@ -256,11 +328,12 @@ describe('aggregations', () => {
 
 describe('indexes', () => {
   test('only the planned indexes exist', async () => {
-    const names = async (model: typeof User | typeof Note | typeof Post) =>
+    const names = async (model: { collection: { indexInformation(): Promise<object> } }) =>
       Object.keys(await model.collection.indexInformation()).sort();
     assert.deepEqual(await names(User), ['_id_', 'email_1', 'interests_1']);
     assert.deepEqual(await names(Note), ['_id_', 'owner_1__id_-1']);
     assert.deepEqual(await names(Post), ['_id_', 'author_1__id_-1']);
+    assert.deepEqual(await names(RefreshToken), ['_id_', 'expiresAt_1', 'tokenHash_1', 'user_1']);
   });
 
   test('list and aggregation queries use an index, not a collection scan', async () => {

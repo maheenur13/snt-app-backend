@@ -3,6 +3,7 @@ import { Types } from 'mongoose';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { Note } from '../models/Note.js';
 import { Post } from '../models/Post.js';
+import { RefreshToken } from '../models/RefreshToken.js';
 import { User } from '../models/User.js';
 import { getPagination, HttpError, paginated } from '../utils/http.js';
 import { createUserBody, updateProfileBody, updateUserBody } from '../validation.js';
@@ -131,7 +132,11 @@ usersRouter.delete('/:id', requireRole('admin'), async (req, res) => {
   if (!user) throw new HttpError(404, 'User not found');
 
   // Content first, user last: if anything fails halfway, retrying the request finishes the cleanup.
-  await Promise.all([Note.deleteMany({ owner: user._id }), Post.deleteMany({ author: user._id })]);
+  await Promise.all([
+    Note.deleteMany({ owner: user._id }),
+    Post.deleteMany({ author: user._id }),
+    RefreshToken.deleteMany({ user: user._id }),
+  ]);
   await user.deleteOne();
   res.status(204).end();
 });

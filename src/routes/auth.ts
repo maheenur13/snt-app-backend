@@ -1,8 +1,8 @@
 import bcrypt from 'bcryptjs';
 import { Router } from 'express';
 import { rateLimit } from 'express-rate-limit';
-import { setTokenCookie, TOKEN_COOKIE, tokenCookieOptions } from '../middleware/auth.js';
 import { User } from '../models/User.js';
+import { endSession, rotateSession, startSession } from '../session.js';
 import { HttpError } from '../utils/http.js';
 import { loginBody, registerBody } from '../validation.js';
 
@@ -28,13 +28,22 @@ const registerLimiter = rateLimit({
   message: tooMany,
 });
 
+// Refreshes happen every 15 minutes per tab, so this only stops a script hammering the endpoint.
+const refreshLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 60,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: tooMany,
+});
+
 // Compared against when the email doesn't exist, so a wrong email takes as long as a wrong password
 // and response time doesn't reveal which emails are registered.
 const DUMMY_HASH = bcrypt.hashSync('dummy-password-for-timing', 12);
 
 authRouter.post('/register', registerLimiter, async (req, res) => {
   const user = await User.create(registerBody.parse(req.body));
-  setTokenCookie(res, user);
+  await startSession(res, user);
   res.status(201).json({ user });
 });
 
@@ -45,11 +54,17 @@ authRouter.post('/login', loginLimiter, async (req, res) => {
   const valid = await bcrypt.compare(password, user?.password ?? DUMMY_HASH);
   if (!user || !valid) throw new HttpError(401, 'Invalid email or password');
 
-  setTokenCookie(res, user);
+  await startSession(res, user);
   res.json({ user });
 });
 
-authRouter.post('/logout', (_req, res) => {
-  res.clearCookie(TOKEN_COOKIE, tokenCookieOptions);
+// Called by the client when the access token has expired. Rotates the refresh token.
+authRouter.post('/refresh', refreshLimiter, async (req, res) => {
+  const user = await rotateSession(req, res);
+  res.json({ user });
+});
+
+authRouter.post('/logout', async (req, res) => {
+  await endSession(req, res);
   res.status(204).end();
 });

@@ -12,7 +12,9 @@ export const config = {
   port: Number(process.env.PORT ?? 4000),
   mongoUri: required('MONGO_URI'),
   jwtSecret,
-  jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? '1d',
+  // access tokens are short-lived; the refresh token keeps the user signed in
+  jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? '15m',
+  refreshTokenDays: Number(process.env.REFRESH_TOKEN_DAYS ?? 7),
   // the frontend origin allowed to call the API from the browser
   clientUrl: process.env.CLIENT_URL ?? 'http://localhost:5173',
 };
