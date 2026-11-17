@@ -18,13 +18,15 @@ Copy `env.example` to `.env` and fill it in (`.env` is git-ignored and must neve
 PORT=4000
 MONGO_URI=mongodb://127.0.0.1:27017/secure-notes
 JWT_SECRET=<random string, at least 32 characters>
-JWT_EXPIRES_IN=15m
+ACCESS_TOKEN_EXPIRES_IN=15m
 REFRESH_TOKEN_DAYS=7
 CLIENT_URL=http://localhost:5173
 LOG_LEVEL=info
 ```
 
 `CLIENT_URL` is the frontend origin allowed by CORS. Generate a secret with `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`.
+
+All variables are validated at startup (`src/config.ts`). A missing or malformed value, like `REFRESH_TOKEN_DAYS=7d`, stops the server with a message naming the variable.
 
 Logging uses `pino`. Each request is logged as one line with its id, method, URL, status and response time. Headers and bodies are never logged, so cookies, tokens and passwords stay out of the logs. Output is readable in development (`pino-pretty`) and JSON when `NODE_ENV=production`. Set the level with `LOG_LEVEL` (default `info`).
 
@@ -52,7 +54,7 @@ Anyone can register; new accounts always get the `user` role. Only an admin can 
 
 ## API
 
-Login and register set two httpOnly cookies: `token`, a 15-minute access JWT, and `refreshToken`, a 7-day refresh token sent only to `/api/auth`. Every route except `/api/auth/*` needs the `token` cookie. When it expires, the client calls `POST /api/auth/refresh` to get a new pair. Browsers send the cookies automatically with `credentials: 'include'`.
+Login and register set two httpOnly cookies: `accessToken`, a 15-minute access JWT, and `refreshToken`, a 7-day refresh token sent only to `/api/auth`. Every route except `/api/auth/*` needs the `accessToken` cookie. When it expires, the client calls `POST /api/auth/refresh` to get a new pair. Browsers send the cookies automatically with `credentials: 'include'`.
 List endpoints accept `?page=1&limit=10` (max 100) and return:
 
 ```json
@@ -123,7 +125,7 @@ The `$match` uses the `_id` index. Both lookups use `{ author: 1, _id: -1 }`. Th
 **Sessions**
 
 - Both tokens are sent only in `httpOnly`, `SameSite=Strict` cookies (`Secure` when `NODE_ENV=production`). Page scripts can't read them, so an XSS bug can't steal them. Browsers don't send them on requests started from other sites, which blocks CSRF. They never appear in a response body.
-- **Access token:** a JWT that lasts 15 minutes (`JWT_EXPIRES_IN`). It is signed and verified with HS256 only, so tokens with `alg: none` or another secret are rejected. `JWT_SECRET` must be at least 32 characters, or the server won't start. The JWT holds only the user id and role. The user is loaded again on every request, so deleted users and role changes take effect immediately.
+- **Access token:** a JWT that lasts 15 minutes (`ACCESS_TOKEN_EXPIRES_IN`). It is signed and verified with HS256 only, so tokens with `alg: none` or another secret are rejected. `JWT_SECRET` must be at least 32 characters, or the server won't start. The JWT holds only the user id and role. The user is loaded again on every request, so deleted users and role changes take effect immediately.
 - **Refresh token:** 32 random bytes that last 7 days (`REFRESH_TOKEN_DAYS`). Only its SHA-256 hash is stored (`refreshtokens` collection), so a database leak doesn't give out working tokens. Its cookie is scoped to `/api/auth`, so it isn't attached to normal API calls.
 - **Rotation and reuse detection:** each refresh token works exactly once, claimed atomically with `findOneAndUpdate`. If an already-used token comes back more than 10 seconds after it was used, someone else has a copy, so every session of that user is revoked. A reuse within 10 seconds is two tabs refreshing at the same moment, so it just fails without revoking anything.
 - Changing a password ends every session that started before the change, for both access and refresh tokens (`passwordChangedAt`).

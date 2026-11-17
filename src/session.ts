@@ -8,7 +8,7 @@ import { RefreshToken } from './models/RefreshToken.js';
 import { User, type UserDocument } from './models/User.js';
 import { HttpError } from './utils/http.js';
 
-export const ACCESS_COOKIE = 'token';
+export const ACCESS_COOKIE = 'accessToken';
 export const REFRESH_COOKIE = 'refreshToken';
 
 // Two tabs whose access tokens expire together both refresh at once with the same token.
@@ -35,7 +35,7 @@ export async function startSession(res: Response, user: UserDocument) {
   const accessToken = jwt.sign({ role: user.role }, config.jwtSecret, {
     algorithm: 'HS256',
     subject: user.id,
-    expiresIn: config.jwtExpiresIn as jwt.SignOptions['expiresIn'],
+    expiresIn: config.accessTokenExpiresIn as jwt.SignOptions['expiresIn'],
   });
 
   const refreshToken = randomBytes(32).toString('base64url');

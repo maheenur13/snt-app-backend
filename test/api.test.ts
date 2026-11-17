@@ -16,13 +16,14 @@ const { Note } = await import('../src/models/Note.js');
 const { Post } = await import('../src/models/Post.js');
 const { RefreshToken } = await import('../src/models/RefreshToken.js');
 const { REUSE_GRACE_MS } = await import('../src/session.js');
+const { parseEnv } = await import('../src/config.js');
 
 let server: Server;
 let baseUrl: string;
 
-// Cookies are sent the way a browser would. `token` is the access token; `refresh` the refresh token.
+// Cookies are sent the way a browser would. `token` is the access token, `refresh` the refresh token.
 async function call(path: string, token?: string, method = 'GET', body?: unknown, refresh?: string) {
-  const cookies = [token && `token=${token}`, refresh && `refreshToken=${refresh}`].filter(Boolean).join('; ');
+  const cookies = [token && `accessToken=${token}`, refresh && `refreshToken=${refresh}`].filter(Boolean).join('; ');
   const res = await fetch(baseUrl + path, {
     method,
     headers: { 'Content-Type': 'application/json', ...(cookies && { Cookie: cookies }) },
@@ -38,9 +39,9 @@ async function call(path: string, token?: string, method = 'GET', body?: unknown
     status: res.status,
     data: res.status === 204 ? null : await res.json(),
     headers: res.headers,
-    setCookie: cookie('token'),
+    accessCookie: cookie('accessToken'),
     refreshCookie: cookie('refreshToken'),
-    token: value('token'),
+    token: value('accessToken'),
     refresh: value('refreshToken'),
   };
 }
@@ -112,7 +113,7 @@ describe('auth', () => {
 
   test('both auth cookies are httpOnly and SameSite=Strict', async () => {
     const res = await call('/auth/login', undefined, 'POST', { email: 'ann@example.com', password: 'password123' });
-    for (const cookie of [res.setCookie!, res.refreshCookie!]) {
+    for (const cookie of [res.accessCookie!, res.refreshCookie!]) {
       assert.match(cookie, /HttpOnly/);
       assert.match(cookie, /SameSite=Strict/);
     }
@@ -147,7 +148,7 @@ describe('auth', () => {
     const session = await register('Leaving', 'leaving@example.com');
     const res = await call('/auth/logout', session.token, 'POST', undefined, session.refresh);
     assert.equal(res.status, 204);
-    assert.match(res.setCookie!, /Expires=Thu, 01 Jan 1970/);
+    assert.match(res.accessCookie!, /Expires=Thu, 01 Jan 1970/);
     assert.match(res.refreshCookie!, /Expires=Thu, 01 Jan 1970/);
     assert.equal((await refreshSession(session.refresh)).status, 401);
   });
@@ -349,6 +350,25 @@ describe('indexes', () => {
       assert.match(text, /IXSCAN/);
       assert.doesNotMatch(text, /COLLSCAN/);
     }
+  });
+});
+
+describe('config', () => {
+  const valid = { MONGO_URI: 'mongodb://localhost/x', JWT_SECRET: 'x'.repeat(32) };
+
+  test('defaults fill in optional variables', () => {
+    const config = parseEnv(valid);
+    assert.equal(config.port, 4000);
+    assert.equal(config.accessTokenExpiresIn, '15m');
+    assert.equal(config.refreshTokenDays, 7);
+  });
+
+  test('a bad value stops startup with a message naming the variable', () => {
+    assert.throws(() => parseEnv({ ...valid, REFRESH_TOKEN_DAYS: '7d' }), /REFRESH_TOKEN_DAYS/);
+    assert.throws(() => parseEnv({ ...valid, ACCESS_TOKEN_EXPIRES_IN: '15 minutes' }), /ACCESS_TOKEN_EXPIRES_IN/);
+    assert.throws(() => parseEnv({ ...valid, JWT_SECRET: 'short' }), /JWT_SECRET must be at least 32/);
+    assert.throws(() => parseEnv({ ...valid, LOG_LEVEL: 'verbose' }), /LOG_LEVEL/);
+    assert.throws(() => parseEnv({ JWT_SECRET: valid.JWT_SECRET }), /MONGO_URI/);
   });
 });
 
