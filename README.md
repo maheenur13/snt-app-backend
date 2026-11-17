@@ -6,7 +6,7 @@ Stack: Node.js, Express 5, TypeScript, MongoDB + Mongoose, Zod (request validati
 
 ## Getting started
 
-Requirements: Node.js 22+, pnpm, and a MongoDB instance (local or Atlas).
+Requirements: Node.js 22.9+, pnpm, and a MongoDB instance (local or Atlas).
 
 ```bash
 pnpm install
@@ -27,7 +27,9 @@ DEMO_ADMIN_EMAIL=demo.admin@example.com
 DEMO_ADMIN_PASSWORD=DemoAdmin@2026
 ```
 
-For MongoDB Atlas, use the `mongodb+srv://` string from Atlas and put the database name before the `?`: `mongodb+srv://<user>:<password>@<cluster>.mongodb.net/secure-notes?retryWrites=true&w=majority`. Without a name, everything goes into a database called `test`. Also allow your server's IP under Atlas → Network Access.
+For MongoDB Atlas, use the `mongodb+srv://` string from Atlas and put the database name before the `?`: `mongodb+srv://<user>:<password>@<cluster>.mongodb.net/secure-notes?retryWrites=true&w=majority`. Without a name, everything goes into a database called `test`. Also allow your server's IP under Atlas → Network Access (`0.0.0.0/0` for Render, whose outgoing IPs change).
+
+If the server fails with `querySrv ECONNREFUSED`, Node can't resolve the `mongodb+srv://` DNS record on that machine. Use the standard connection string instead (Atlas → Connect → Drivers, older driver version), which lists the three hosts directly: `mongodb://<user>:<password>@<host-00>:27017,<host-01>:27017,<host-02>:27017/secure-notes?ssl=true&replicaSet=<replica-set>&authSource=admin`.
 
 `CLIENT_URL` is the frontend origin allowed by CORS. `TRUST_PROXY` is the number of proxies in front of the app: keep `0` locally and set `2` on Render behind the Vercel `/api` proxy (see Security). Generate a secret with `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`.
 
@@ -56,9 +58,9 @@ pnpm dev
 
 On `SIGTERM` or `SIGINT` (Ctrl+C), the server stops taking new connections, lets running requests finish (up to 10 seconds), closes the MongoDB connection and exits.
 
-The API runs on `http://localhost:4000`. Other scripts: `pnpm build`, `pnpm start`, `pnpm typecheck`.
+The API runs on `http://localhost:4000`. Other scripts: `pnpm build`, `pnpm start` (runs `dist/`; reads `.env` if present, otherwise the real environment), `pnpm typecheck`.
 
-Tests: `pnpm test` runs end-to-end API tests against a real MongoDB. They use a separate `secure-notes-test` database, which is dropped on each run (set `TEST_MONGO_URI` to change it). They cover auth, note ownership, admin rules, both aggregations, the exact set of indexes, and that queries hit an index.
+Tests: `pnpm test` runs end-to-end API tests against a real MongoDB. They use a separate `secure-notes-test` database, which is dropped on each run (set `TEST_MONGO_URI` to change it). They cover auth, refresh token rotation and reuse detection, note ownership, admin rules, both aggregations, the exact set of indexes, that queries hit an index, the demo admin, and environment validation. Never point `TEST_MONGO_URI` at a real database.
 
 Code quality: `pnpm lint` (ESLint), `pnpm format` / `pnpm format:check` (Prettier). A Husky pre-commit hook runs lint-staged, which lints and formats only the staged files.
 
@@ -75,6 +77,11 @@ src/
   services/      business rules and database work, no req/res (ownership checks, aggregations)
   models/        Mongoose schemas, indexes and shared field limits
   middleware/    authentication, role checks, error handling
+  utils/         HttpError and pagination helpers
+  scripts/       create-admin CLI
+  app.ts         Express app: security middleware and routers
+  index.ts       startup (MongoDB, demo admin) and graceful shutdown
+  logger.ts      pino logger
   session.ts     access and refresh token cookies
   validation.ts  Zod request schemas
   config.ts      validated environment variables
@@ -90,7 +97,8 @@ Anyone can register; new accounts always get the `user` role. Only an admin can 
 ## API
 
 Login and register set two httpOnly cookies: `accessToken`, a 15-minute access JWT, and `refreshToken`, a 7-day refresh token sent only to `/api/auth`. Every route except `/api/auth/*` needs the `accessToken` cookie. When it expires, the client calls `POST /api/auth/refresh` to get a new pair. Browsers send the cookies automatically with `credentials: 'include'`.
-List endpoints accept `?page=1&limit=10` (max 100) and return:
+
+List endpoints accept `?page=1&limit=10` (`limit` max 100). Missing or out-of-range values fall back to page 1 and 10 per page. They return:
 
 ```json
 { "items": [], "page": 1, "limit": 10, "total": 0, "totalPages": 0 }
@@ -117,9 +125,9 @@ List endpoints accept `?page=1&limit=10` (max 100) and return:
 | POST   | `/api/users`             | admin         | `{ name, email, password, role?, interests? }`      |
 | GET    | `/api/users/:id`         | admin         | Single user                                         |
 | PATCH  | `/api/users/:id`         | admin         | `{ name?, email?, password?, role?, interests? }`   |
-| DELETE | `/api/users/:id`         | admin         | Delete a user with their notes and posts            |
+| DELETE | `/api/users/:id`         | admin         | Delete a user with their notes, posts and sessions  |
 
-Errors come back as `{ "message": "..." }` with a matching status code (400, 401, 403, 404, 409, 500).
+Errors come back as `{ "message": "..." }` with a matching status code (400, 401, 403, 404, 409, 429, 500).
 
 ## Indexes
 
@@ -175,10 +183,20 @@ The `$match` uses the `_id` index. Both lookups use `{ author: 1, _id: -1 }`. Th
 **HTTP**
 
 - `helmet` sets security headers (`nosniff`, frame blocking, HSTS, a strict CSP for API responses) and removes `X-Powered-By`.
-- CORS allows only `CLIENT_URL`, with credentials. The frontend and API must be on the same site (for example `localhost` and `localhost`, or `app.example.com` and `api.example.com`) for the `SameSite=Strict` cookie to be sent.
+- CORS allows only `CLIENT_URL`, with credentials. The frontend and API must be on the same site (for example `localhost` and `localhost`, or `app.example.com` and `api.example.com`) for the `SameSite=Strict` cookie to be sent. In the deployed setup the frontend calls its own `/api` path and Vercel forwards it to Render, so the browser only ever talks to one site.
 - JSON bodies are limited to 100 KB. The models cap lengths (name, email, note and post text, 20 interests of up to 50 characters each) and check email format.
 
 **Data access**
 
 - Every request body and query is parsed with Zod (`src/validation.ts`) before it reaches a handler. Each field has a fixed type, which blocks operator injection like `{ "email": { "$gt": "" } }`. Unknown fields are dropped, so a user can't set their own role. The Mongoose models keep their own rules as a second check at the database level.
 - Admins can't delete themselves or remove their own admin role, so the app can't lose its last admin by accident.
+
+## Deployment
+
+The live demo runs on Render (API), Vercel (frontend) and MongoDB Atlas.
+
+1. Render → New Web Service from this repo. Build command `pnpm install && pnpm build`, start command `pnpm start`.
+2. Set the environment variables in Render → Environment (there is no `.env` file on Render): `NODE_ENV=production`, `MONGO_URI` (Atlas, with `/secure-notes` as the database), `JWT_SECRET`, `CLIENT_URL` (the Vercel URL), `TRUST_PROXY=2`, and optionally the demo admin variables.
+3. The frontend's `vercel.json` forwards `/api/*` to this service, so cookies stay first-party. See the frontend README.
+
+Render's free plan sleeps after 15 minutes without traffic, so the first request after that can take up to a minute.
