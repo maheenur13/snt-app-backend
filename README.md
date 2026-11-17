@@ -35,6 +35,8 @@ pnpm create-admin admin@example.com 'StrongPassword1' 'Admin'
 pnpm dev
 ```
 
+On `SIGTERM` or `SIGINT` (Ctrl+C), the server stops taking new connections, lets running requests finish (up to 10 seconds), closes the MongoDB connection and exits.
+
 The API runs on `http://localhost:4000`. Other scripts: `pnpm build`, `pnpm start`, `pnpm typecheck`.
 
 Tests: `pnpm test` runs end-to-end API tests against a real MongoDB. They use a separate `secure-notes-test` database, which is dropped on each run (set `TEST_MONGO_URI` to change it). They cover auth, note ownership, admin rules, both aggregations, the exact set of indexes, and that queries hit an index.
