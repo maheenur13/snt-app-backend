@@ -17,9 +17,12 @@ Create a `.env` file in this folder:
 ```
 PORT=4000
 MONGO_URI=mongodb://127.0.0.1:27017/secure-notes
-JWT_SECRET=<long random string>
+JWT_SECRET=<random string, at least 32 characters>
 JWT_EXPIRES_IN=1d
+CLIENT_URL=http://localhost:5173
 ```
+
+`CLIENT_URL` is the frontend origin allowed by CORS. Generate a secret with `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`.
 
 Create the first admin (or promote an existing account), then start the server:
 

@@ -1,4 +1,6 @@
+import cors from 'cors';
 import express from 'express';
+import { config } from './config.js';
 import { errorHandler, notFound } from './middleware/errors.js';
 import { authRouter } from './routes/auth.js';
 import { notesRouter } from './routes/notes.js';
@@ -7,6 +9,7 @@ import { usersRouter } from './routes/users.js';
 
 export const app = express();
 
+app.use(cors({ origin: config.clientUrl }));
 app.use(express.json({ limit: '100kb' }));
 
 app.use('/api/auth', authRouter);

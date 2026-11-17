@@ -12,4 +12,6 @@ export const config = {
   mongoUri: required('MONGO_URI'),
   jwtSecret,
   jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? '1d',
+  // the frontend origin allowed to call the API from the browser
+  clientUrl: process.env.CLIENT_URL ?? 'http://localhost:5173',
 };
