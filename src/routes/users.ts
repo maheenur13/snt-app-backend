@@ -45,7 +45,8 @@ usersRouter.get('/by-interest', async (req, res) => {
     {
       $group: {
         _id: '$interests',
-        users: { $push: { _id: '$_id', name: '$name' } },
+        // capped so a popular interest can't grow past the 16 MB document limit; count stays exact
+        users: { $firstN: { n: 20, input: { _id: '$_id', name: '$name' } } },
         count: { $sum: 1 },
       },
     },
@@ -74,26 +75,22 @@ usersRouter.get('/:id/posts', async (req, res) => {
         from: Post.collection.name,
         localField: '_id',
         foreignField: 'author',
-        as: 'posts',
-        pipeline: [
-          { $sort: { _id: -1 } },
-          {
-            $facet: {
-              items: [{ $skip: skip }, { $limit: limit }, { $project: { author: 0, __v: 0 } }],
-              total: [{ $count: 'count' }],
-            },
-          },
-        ],
+        as: 'items',
+        // only the requested page is fetched from disk
+        pipeline: [{ $sort: { _id: -1 } }, { $skip: skip }, { $limit: limit }, { $project: { author: 0, __v: 0 } }],
       },
     },
-    { $unwind: '$posts' },
     {
-      $project: {
-        name: 1,
-        items: '$posts.items',
-        total: { $ifNull: [{ $first: '$posts.total.count' }, 0] },
+      $lookup: {
+        from: Post.collection.name,
+        localField: '_id',
+        foreignField: 'author',
+        as: 'total',
+        // projecting only _id lets the index answer the count without reading the posts
+        pipeline: [{ $project: { _id: 1 } }, { $count: 'count' }],
       },
     },
+    { $project: { name: 1, items: 1, total: { $ifNull: [{ $first: '$total.count' }, 0] } } },
   ]);
   if (!result) throw new HttpError(404, 'User not found');
 
@@ -157,9 +154,11 @@ usersRouter.patch('/:id', requireRole('admin'), async (req, res) => {
 usersRouter.delete('/:id', requireRole('admin'), async (req, res) => {
   if (req.user!.id === req.params.id) throw new HttpError(400, 'You cannot delete your own account');
 
-  const user = await User.findByIdAndDelete(req.params.id);
+  const user = await User.findById(req.params.id);
   if (!user) throw new HttpError(404, 'User not found');
 
+  // Content first, user last: if anything fails halfway, retrying the request finishes the cleanup.
   await Promise.all([Note.deleteMany({ owner: user._id }), Post.deleteMany({ author: user._id })]);
+  await user.deleteOne();
   res.status(204).end();
 });

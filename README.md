@@ -30,6 +30,8 @@ pnpm dev
 
 The API runs on `http://localhost:4000`. Other scripts: `pnpm build`, `pnpm start`, `pnpm typecheck`.
 
+Tests: `pnpm test` runs end-to-end API tests against a real MongoDB. They use a separate `secure-notes-test` database, which is dropped on each run (set `TEST_MONGO_URI` to change it). They cover auth, note ownership, admin rules, both aggregations, the exact set of indexes, and that queries hit an index.
+
 Code quality: `pnpm lint` (ESLint), `pnpm format` / `pnpm format:check` (Prettier). A Husky pre-commit hook runs lint-staged, which lints and formats only the staged files.
 
 ## Roles
@@ -96,11 +98,11 @@ Both live in `src/routes/users.ts`.
 
 **Scenario 1: users grouped by interest.** One `User.aggregate()` call:
 `$match { interests: { $gt: '' } }` → `$project` → `$unwind` → `$group` by interest → `$sort` → `$facet` (page + total).
-The `$gt: ''` range runs on the multikey `interests` index, so the pipeline starts with an index scan and skips users with no interests. Interests are trimmed, lower-cased and de-duplicated on save, so each user appears once per group.
+The `$gt: ''` range runs on the multikey `interests` index, so the pipeline starts with an index scan and skips users with no interests. Interests are trimmed, lower-cased and de-duplicated on save, so each user appears once per group. Each group lists up to 20 users (`$firstN`) so one popular interest can't exceed the 16 MB document limit. `count` is always the full number.
 
 **Scenario 2: posts of a user.** One `User.aggregate()` call:
-`$match { _id }` → `$lookup` into `posts` on `author` with a sub-pipeline `$sort { _id: -1 }` → `$facet` (page + total).
-The `$match` uses the `_id` index, and the lookup uses `{ author: 1, _id: -1 }` for both the equality match and the sort.
+`$match { _id }` → `$lookup` (page: `$sort { _id: -1 }` → `$skip` → `$limit`) → `$lookup` (total: `$project { _id: 1 }` → `$count`).
+The `$match` uses the `_id` index. Both lookups use `{ author: 1, _id: -1 }`. The first reads only the requested page. The second only needs `_id`, so the index answers the count without reading the posts.
 
 ## Security notes
 
