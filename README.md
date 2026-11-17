@@ -109,7 +109,7 @@ Every response uses the same envelope, built in `src/utils/http.ts`. The HTTP st
 // a list
 { "success": true, "data": [], "meta": { "page": 1, "limit": 10, "total": 0, "totalPages": 0 } }
 
-// an error (400, 401, 403, 404, 409, 429, 500)
+// an error (400, 401, 403, 404, 409, 413, 429, 500)
 { "success": false, "message": "Note not found" }
 ```
 
@@ -197,7 +197,7 @@ The `$match` uses the `_id` index. Both lookups use `{ author: 1, _id: -1 }`. Th
 
 - `helmet` sets security headers (`nosniff`, frame blocking, HSTS, a strict CSP for API responses) and removes `X-Powered-By`.
 - CORS allows only `CLIENT_URL`, with credentials. The frontend and API must be on the same site (for example `localhost` and `localhost`, or `app.example.com` and `api.example.com`) for the `SameSite=Strict` cookie to be sent. In the deployed setup the frontend calls its own `/api` path and Vercel forwards it to Render, so the browser only ever talks to one site.
-- JSON bodies are limited to 100 KB. The models cap lengths (name, email, note and post text, 20 interests of up to 50 characters each) and check email format.
+- JSON bodies are limited to 100 KB; larger ones get a 413. The models cap lengths (name, email, note and post text, 20 interests of up to 50 characters each) and check email format.
 
 **Data access**
 

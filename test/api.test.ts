@@ -132,6 +132,12 @@ describe('auth', () => {
     }
   });
 
+  test('a body over 100 KB is rejected with 413', async () => {
+    const res = await call('/auth/login', undefined, 'POST', { email: 'a@b.co', password: 'x'.repeat(110_000) });
+    assert.equal(res.status, 413);
+    assert.deepEqual(res.body, { success: false, message: 'Request body is too large' });
+  });
+
   test('both auth cookies are httpOnly and SameSite=Strict', async () => {
     const res = await call('/auth/login', undefined, 'POST', { email: 'ann@example.com', password: 'password123' });
     for (const cookie of [res.accessCookie!, res.refreshCookie!]) {

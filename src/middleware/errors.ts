@@ -38,6 +38,11 @@ export function errorHandler(err: unknown, req: Request, res: Response, _next: N
     sendError(res, 400, 'Malformed JSON body');
     return;
   }
+  // raised by express.json() when the body is over its limit
+  if ((err as { type?: string }).type === 'entity.too.large') {
+    sendError(res, 413, 'Request body is too large');
+    return;
+  }
 
   // req.log is the request-scoped logger from pino-http, so the error line carries the request id
   req.log.error({ err }, 'Unhandled error');
