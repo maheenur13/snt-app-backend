@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import { app } from './app.js';
 import { config } from './config.js';
-import { ensureDemoAdmin } from './demo-admin.js';
+import { ensureDemoAdmin } from './services/demo-admin.service.js';
 import { logger } from './logger.js';
 
 // If requests are still running after this long, exit anyway rather than hang the deploy.

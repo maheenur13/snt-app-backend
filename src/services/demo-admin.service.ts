@@ -1,5 +1,5 @@
 import bcrypt from 'bcryptjs';
-import { User } from './models/User.js';
+import { User } from '../models/User.js';
 
 /**
  * Makes sure the demo admin from DEMO_ADMIN_EMAIL / DEMO_ADMIN_PASSWORD exists, so reviewers can log in.

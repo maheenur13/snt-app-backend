@@ -6,10 +6,10 @@ import { pinoHttp } from 'pino-http';
 import { config } from './config.js';
 import { logger } from './logger.js';
 import { errorHandler, notFound } from './middleware/errors.js';
-import { authRouter } from './routes/auth.js';
-import { notesRouter } from './routes/notes.js';
-import { postsRouter } from './routes/posts.js';
-import { usersRouter } from './routes/users.js';
+import { authRouter } from './routes/auth.routes.js';
+import { notesRouter } from './routes/notes.routes.js';
+import { postsRouter } from './routes/posts.routes.js';
+import { usersRouter } from './routes/users.routes.js';
 
 export const app = express();
 

@@ -17,7 +17,7 @@ const { Post } = await import('../src/models/Post.js');
 const { RefreshToken } = await import('../src/models/RefreshToken.js');
 const { REUSE_GRACE_MS } = await import('../src/session.js');
 const { parseEnv } = await import('../src/config.js');
-const { ensureDemoAdmin } = await import('../src/demo-admin.js');
+const { ensureDemoAdmin } = await import('../src/services/demo-admin.service.js');
 
 let server: Server;
 let baseUrl: string;

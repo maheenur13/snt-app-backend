@@ -1,31 +1,26 @@
-import { Router } from 'express';
 import { Types } from 'mongoose';
-import { authenticate, requireRole } from '../middleware/auth.js';
+import type { z } from 'zod';
 import { Note } from '../models/Note.js';
 import { Post } from '../models/Post.js';
 import { RefreshToken } from '../models/RefreshToken.js';
-import { User } from '../models/User.js';
-import { getPagination, HttpError, paginated } from '../utils/http.js';
-import { createUserBody, updateProfileBody, updateUserBody } from '../validation.js';
+import { User, type UserDocument } from '../models/User.js';
+import { HttpError, type Pagination } from '../utils/http.js';
+import type { createUserBody, updateProfileBody, updateUserBody } from '../validation.js';
 
-export const usersRouter = Router();
-usersRouter.use(authenticate);
+export function updateProfile(user: UserDocument, changes: z.infer<typeof updateProfileBody>) {
+  user.set(changes);
+  return user.save();
+}
 
-usersRouter.get('/me', (req, res) => {
-  res.json(req.user);
-});
-
-usersRouter.patch('/me', async (req, res) => {
-  const user = req.user!;
-  user.set(updateProfileBody.parse(req.body));
-  await user.save();
-  res.json(user);
-});
+interface InterestGroup {
+  interest: string;
+  count: number;
+  users: { _id: Types.ObjectId; name: string }[];
+}
 
 // Scenario 1: users grouped by interest, in a single aggregate() call (paged with $facet).
-usersRouter.get('/by-interest', async (req, res) => {
-  const { page, limit, skip } = getPagination(req);
-  const [result] = await User.aggregate<{ items: unknown[]; total: { count: number }[] }>([
+export async function groupByInterest({ skip, limit }: Pagination) {
+  const [result] = await User.aggregate<{ items: InterestGroup[]; total: { count: number }[] }>([
     // Range scan on the multikey { interests: 1 } index. Skips users without interests
     // so the pipeline starts with IXSCAN instead of a collection scan.
     { $match: { interests: { $gt: '' } } },
@@ -47,17 +42,16 @@ usersRouter.get('/by-interest', async (req, res) => {
       },
     },
   ]);
-  res.json(paginated(result.items, result.total[0]?.count ?? 0, { page, limit, skip }));
-});
+  return { items: result.items, total: result.total[0]?.count ?? 0 };
+}
 
 // Scenario 2: posts of one user via a single pipeline with $lookup.
-// $match on _id uses the default index; the $lookup uses { author: 1, _id: -1 } on posts.
-usersRouter.get('/:id/posts', async (req, res) => {
-  if (!Types.ObjectId.isValid(req.params.id)) throw new HttpError(404, 'User not found');
-  const { page, limit, skip } = getPagination(req);
+// $match on _id uses the default index; both lookups use { author: 1, _id: -1 } on posts.
+export async function postsOfUser(id: string, { skip, limit }: Pagination) {
+  if (!Types.ObjectId.isValid(id)) throw new HttpError(404, 'User not found');
 
   const [result] = await User.aggregate([
-    { $match: { _id: new Types.ObjectId(req.params.id) } },
+    { $match: { _id: new Types.ObjectId(id) } },
     { $project: { name: 1 } },
     {
       $lookup: {
@@ -83,53 +77,43 @@ usersRouter.get('/:id/posts', async (req, res) => {
   ]);
   if (!result) throw new HttpError(404, 'User not found');
 
-  res.json({
-    user: { _id: result._id, name: result.name },
-    ...paginated(result.items, result.total, { page, limit, skip }),
-  });
-});
+  return { user: { _id: result._id, name: result.name }, items: result.items, total: result.total as number };
+}
 
 // ---- Admin: user management ----
 
-usersRouter.get('/', requireRole('admin'), async (req, res) => {
-  const pagination = getPagination(req);
+// Sorted by _id, so the default _id index is enough.
+export async function list({ skip, limit }: Pagination) {
   const [items, total] = await Promise.all([
-    User.find().sort({ _id: -1 }).skip(pagination.skip).limit(pagination.limit),
+    User.find().sort({ _id: -1 }).skip(skip).limit(limit),
     User.estimatedDocumentCount(),
   ]);
-  res.json(paginated(items, total, pagination));
-});
+  return { items, total };
+}
 
-usersRouter.post('/', requireRole('admin'), async (req, res) => {
-  const user = await User.create(createUserBody.parse(req.body));
-  res.status(201).json(user);
-});
+export function create(data: z.infer<typeof createUserBody>) {
+  return User.create(data);
+}
 
-usersRouter.get('/:id', requireRole('admin'), async (req, res) => {
-  const user = await User.findById(req.params.id);
+export async function getById(id: string) {
+  const user = await User.findById(id);
   if (!user) throw new HttpError(404, 'User not found');
-  res.json(user);
-});
+  return user;
+}
 
-usersRouter.patch('/:id', requireRole('admin'), async (req, res) => {
-  const changes = updateUserBody.parse(req.body);
-  const user = await User.findById(req.params.id);
-  if (!user) throw new HttpError(404, 'User not found');
-
-  if (changes.role && changes.role !== 'admin' && user._id.equals(req.user!._id)) {
+export async function update(id: string, changes: z.infer<typeof updateUserBody>, actingAdmin: UserDocument) {
+  const user = await getById(id);
+  // keeps at least one admin around: you can't demote yourself
+  if (changes.role && changes.role !== 'admin' && user._id.equals(actingAdmin._id)) {
     throw new HttpError(400, 'You cannot remove your own admin role');
   }
-
   user.set(changes); // a new password is hashed by the pre-save hook
-  await user.save();
-  res.json(user);
-});
+  return user.save();
+}
 
-usersRouter.delete('/:id', requireRole('admin'), async (req, res) => {
-  if (req.user!.id === req.params.id) throw new HttpError(400, 'You cannot delete your own account');
-
-  const user = await User.findById(req.params.id);
-  if (!user) throw new HttpError(404, 'User not found');
+export async function remove(id: string, actingAdmin: UserDocument) {
+  if (actingAdmin.id === id) throw new HttpError(400, 'You cannot delete your own account');
+  const user = await getById(id);
 
   // Content first, user last: if anything fails halfway, retrying the request finishes the cleanup.
   await Promise.all([
@@ -138,5 +122,4 @@ usersRouter.delete('/:id', requireRole('admin'), async (req, res) => {
     RefreshToken.deleteMany({ user: user._id }),
   ]);
   await user.deleteOne();
-  res.status(204).end();
-});
+}

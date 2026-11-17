@@ -63,6 +63,22 @@ Code quality: `pnpm lint` (ESLint), `pnpm format` / `pnpm format:check` (Prettie
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org) (`feat(auth): ...`, `fix(notes): ...`, `docs: ...`). A Husky `commit-msg` hook runs commitlint and rejects any other format. Run `pnpm commit` for a guided prompt (commitizen with `@commitlint/cz-commitlint`, so the prompt follows the same rules).
 
+## Project structure
+
+The code is split into layers. Each layer only calls the one below it:
+
+```
+src/
+  routes/        URL + HTTP method -> middleware -> controller (no logic)
+  controllers/   HTTP only: parse input with Zod, call a service, set cookies, send the response
+  services/      business rules and database work, no req/res (ownership checks, aggregations)
+  models/        Mongoose schemas, indexes and shared field limits
+  middleware/    authentication, role checks, error handling
+  session.ts     access and refresh token cookies
+  validation.ts  Zod request schemas
+  config.ts      validated environment variables
+```
+
 ## Roles
 
 - **user** – create, read, update and delete their own notes; edit their profile and interests; write posts.
@@ -128,7 +144,7 @@ Sorting by `_id` instead of `createdAt` gives the same order, because ObjectIds 
 
 ## Aggregations
 
-Both live in `src/routes/users.ts`.
+Both live in `src/services/users.service.ts` (`groupByInterest` and `postsOfUser`).
 
 **Scenario 1: users grouped by interest.** One `User.aggregate()` call:
 `$match { interests: { $gt: '' } }` → `$project` → `$unwind` → `$group` by interest → `$sort` → `$facet` (page + total).
