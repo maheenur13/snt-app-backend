@@ -3,21 +3,12 @@ import { Types } from 'mongoose';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { Note } from '../models/Note.js';
 import { Post } from '../models/Post.js';
-import { ROLES, User, type Role } from '../models/User.js';
-import { getPagination, HttpError, paginated, readString, readStringArray } from '../utils/http.js';
+import { User } from '../models/User.js';
+import { getPagination, HttpError, paginated } from '../utils/http.js';
+import { createUserBody, updateProfileBody, updateUserBody } from '../validation.js';
 
 export const usersRouter = Router();
 usersRouter.use(authenticate);
-
-function normalizeInterests(interests: string[]): string[] {
-  return [...new Set(interests.map((i) => i.trim().toLowerCase()).filter(Boolean))];
-}
-
-function readRole(body: unknown): Role | undefined {
-  const role = readString(body, 'role');
-  if (role !== undefined && !ROLES.includes(role as Role)) throw new HttpError(400, 'Invalid role');
-  return role as Role | undefined;
-}
 
 usersRouter.get('/me', (req, res) => {
   res.json(req.user);
@@ -25,10 +16,7 @@ usersRouter.get('/me', (req, res) => {
 
 usersRouter.patch('/me', async (req, res) => {
   const user = req.user!;
-  const name = readString(req.body, 'name');
-  const interests = readStringArray(req.body, 'interests');
-  if (name !== undefined) user.name = name;
-  if (interests !== undefined) user.interests = normalizeInterests(interests);
+  user.set(updateProfileBody.parse(req.body));
   await user.save();
   res.json(user);
 });
@@ -112,13 +100,7 @@ usersRouter.get('/', requireRole('admin'), async (req, res) => {
 });
 
 usersRouter.post('/', requireRole('admin'), async (req, res) => {
-  const user = await User.create({
-    name: readString(req.body, 'name', { required: true }),
-    email: readString(req.body, 'email', { required: true }),
-    password: readString(req.body, 'password', { required: true }),
-    role: readRole(req.body) ?? 'user',
-    interests: normalizeInterests(readStringArray(req.body, 'interests') ?? []),
-  });
+  const user = await User.create(createUserBody.parse(req.body));
   res.status(201).json(user);
 });
 
@@ -129,24 +111,15 @@ usersRouter.get('/:id', requireRole('admin'), async (req, res) => {
 });
 
 usersRouter.patch('/:id', requireRole('admin'), async (req, res) => {
+  const changes = updateUserBody.parse(req.body);
   const user = await User.findById(req.params.id);
   if (!user) throw new HttpError(404, 'User not found');
 
-  const name = readString(req.body, 'name');
-  const email = readString(req.body, 'email');
-  const password = readString(req.body, 'password');
-  const role = readRole(req.body);
-  const interests = readStringArray(req.body, 'interests');
-
-  if (role !== undefined && user._id.equals(req.user!._id) && role !== 'admin') {
+  if (changes.role && changes.role !== 'admin' && user._id.equals(req.user!._id)) {
     throw new HttpError(400, 'You cannot remove your own admin role');
   }
 
-  if (name !== undefined) user.name = name;
-  if (email !== undefined) user.email = email;
-  if (password !== undefined) user.password = password; // hashed by the pre-save hook
-  if (role !== undefined) user.role = role;
-  if (interests !== undefined) user.interests = normalizeInterests(interests);
+  user.set(changes); // a new password is hashed by the pre-save hook
   await user.save();
   res.json(user);
 });

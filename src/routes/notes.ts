@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { Note } from '../models/Note.js';
-import { getPagination, HttpError, paginated, readString } from '../utils/http.js';
+import { getPagination, HttpError, paginated } from '../utils/http.js';
+import { createNoteBody, updateNoteBody } from '../validation.js';
 
 export const notesRouter = Router();
 notesRouter.use(authenticate);
@@ -28,11 +29,7 @@ notesRouter.get('/all', requireRole('admin'), async (req, res) => {
 });
 
 notesRouter.post('/', async (req, res) => {
-  const note = await Note.create({
-    owner: req.user!._id,
-    title: readString(req.body, 'title', { required: true }),
-    content: readString(req.body, 'content'),
-  });
+  const note = await Note.create({ ...createNoteBody.parse(req.body), owner: req.user!._id });
   res.status(201).json(note);
 });
 
@@ -44,12 +41,11 @@ notesRouter.get('/:id', async (req, res) => {
 });
 
 notesRouter.patch('/:id', async (req, res) => {
+  const changes = updateNoteBody.parse(req.body);
   const note = await Note.findOne({ _id: req.params.id, owner: req.user!._id });
   if (!note) throw new HttpError(404, 'Note not found');
 
-  // check presence, not truthiness: an empty title must reach the model's `required` rule and fail with 400
-  if (req.body?.title !== undefined) note.title = readString(req.body, 'title') ?? '';
-  if (req.body?.content !== undefined) note.content = readString(req.body, 'content') ?? '';
+  note.set(changes);
   await note.save();
   res.json(note);
 });

@@ -2,7 +2,7 @@
 
 REST API for a note-taking app with JWT auth and role-based access (`user`, `admin`).
 
-Stack: Node.js, Express 5, TypeScript, MongoDB + Mongoose, JWT (`jsonwebtoken`), bcrypt password hashing (`bcryptjs`).
+Stack: Node.js, Express 5, TypeScript, MongoDB + Mongoose, Zod (request validation), JWT (`jsonwebtoken`), bcrypt password hashing (`bcryptjs`).
 
 ## Getting started
 
@@ -134,5 +134,5 @@ The `$match` uses the `_id` index. Both lookups use `{ author: 1, _id: -1 }`. Th
 
 **Data access**
 
-- Request fields are checked to be strings before they reach a query, which blocks operator injection like `{ "email": { "$gt": "" } }`. Only known fields are copied from the body, so a user can't set their own role.
+- Every request body and query is parsed with Zod (`src/validation.ts`) before it reaches a handler. Each field has a fixed type, which blocks operator injection like `{ "email": { "$gt": "" } }`. Unknown fields are dropped, so a user can't set their own role. The Mongoose models keep their own rules as a second check at the database level.
 - Admins can't delete themselves or remove their own admin role, so the app can't lose its last admin by accident.

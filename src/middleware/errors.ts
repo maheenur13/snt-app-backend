@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
 import mongoose from 'mongoose';
+import { ZodError } from 'zod';
 import { HttpError } from '../utils/http.js';
 
 export function notFound(_req: Request, res: Response) {
@@ -9,6 +10,10 @@ export function notFound(_req: Request, res: Response) {
 export function errorHandler(err: unknown, req: Request, res: Response, _next: NextFunction) {
   if (err instanceof HttpError) {
     res.status(err.status).json({ message: err.message });
+    return;
+  }
+  if (err instanceof ZodError) {
+    res.status(400).json({ message: err.issues.map((issue) => issue.message).join(', ') });
     return;
   }
   if (err instanceof mongoose.Error.ValidationError) {

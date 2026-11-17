@@ -112,10 +112,13 @@ describe('auth', () => {
     assert.equal((await call('/users/me', unsigned)).status, 401);
   });
 
-  test('invalid input is rejected by the model', async () => {
+  test('invalid input is rejected with a readable message', async () => {
     const bad = (body: object) =>
       call('/auth/register', undefined, 'POST', { name: 'X', password: 'password123', ...body });
-    assert.equal((await bad({ email: 'not-an-email' })).status, 400);
+    const invalidEmail = await bad({ email: 'not-an-email' });
+    assert.equal(invalidEmail.status, 400);
+    assert.equal(invalidEmail.data.message, 'Email is not valid');
+    assert.equal((await bad({ email: 'typed@example.com', name: { $ne: null } })).status, 400);
     assert.equal((await bad({ email: 'long@example.com', password: 'a'.repeat(73) })).status, 400);
     const { token } = await register('Many', 'many@example.com');
     const tooMany = Array.from({ length: 21 }, (_, i) => `topic-${i}`);

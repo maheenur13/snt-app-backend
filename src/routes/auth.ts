@@ -3,7 +3,8 @@ import { Router } from 'express';
 import { rateLimit } from 'express-rate-limit';
 import { setTokenCookie, TOKEN_COOKIE, tokenCookieOptions } from '../middleware/auth.js';
 import { User } from '../models/User.js';
-import { HttpError, readString } from '../utils/http.js';
+import { HttpError } from '../utils/http.js';
+import { loginBody, registerBody } from '../validation.js';
 
 export const authRouter = Router();
 
@@ -32,20 +33,15 @@ const registerLimiter = rateLimit({
 const DUMMY_HASH = bcrypt.hashSync('dummy-password-for-timing', 12);
 
 authRouter.post('/register', registerLimiter, async (req, res) => {
-  const user = await User.create({
-    name: readString(req.body, 'name', { required: true }),
-    email: readString(req.body, 'email', { required: true }),
-    password: readString(req.body, 'password', { required: true }),
-  });
+  const user = await User.create(registerBody.parse(req.body));
   setTokenCookie(res, user);
   res.status(201).json({ user });
 });
 
 authRouter.post('/login', loginLimiter, async (req, res) => {
-  const email = readString(req.body, 'email', { required: true })!;
-  const password = readString(req.body, 'password', { required: true })!;
+  const { email, password } = loginBody.parse(req.body);
 
-  const user = await User.findOne({ email: email.trim().toLowerCase() }).select('+password');
+  const user = await User.findOne({ email }).select('+password');
   const valid = await bcrypt.compare(password, user?.password ?? DUMMY_HASH);
   if (!user || !valid) throw new HttpError(401, 'Invalid email or password');
 
