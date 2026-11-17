@@ -46,7 +46,7 @@ Anyone can register; new accounts always get the `user` role. Only an admin can 
 
 ## API
 
-Every route except `/api/auth/*` needs an `Authorization: Bearer <token>` header.
+Login and register set the JWT in an httpOnly `token` cookie. Every route except `/api/auth/*` needs that cookie. Browsers send it automatically with `credentials: 'include'`.
 List endpoints accept `?page=1&limit=10` (max 100) and return:
 
 ```json
@@ -55,8 +55,9 @@ List endpoints accept `?page=1&limit=10` (max 100) and return:
 
 | Method | Path                     | Access        | Description                                         |
 | ------ | ------------------------ | ------------- | --------------------------------------------------- |
-| POST   | `/api/auth/register`     | public        | `{ name, email, password }` → `{ token, user }`     |
-| POST   | `/api/auth/login`        | public        | `{ email, password }` → `{ token, user }`           |
+| POST   | `/api/auth/register`     | public        | `{ name, email, password }` → `{ user }` + cookie   |
+| POST   | `/api/auth/login`        | public        | `{ email, password }` → `{ user }` + cookie         |
+| POST   | `/api/auth/logout`       | public        | Clears the cookie                                   |
 | GET    | `/api/users/me`          | user          | Own profile                                         |
 | PATCH  | `/api/users/me`          | user          | `{ name?, interests? }`                             |
 | GET    | `/api/users/by-interest` | user          | Users grouped by interest (aggregation, scenario 1) |
@@ -109,8 +110,27 @@ The `$match` uses the `_id` index. Both lookups use `{ author: 1, _id: -1 }`. Th
 
 ## Security notes
 
-- Passwords are hashed with bcrypt (cost 12) in a pre-save hook and are never returned (`select: false` plus a `toJSON` transform).
-- Login returns the same error for an unknown email and a wrong password.
+**Sessions**
+
+- The JWT is sent only in an `httpOnly`, `SameSite=Strict` cookie (`Secure` when `NODE_ENV=production`). Page scripts can't read it, so an XSS bug can't steal it. Browsers don't send it on requests started from other sites, which blocks CSRF. It never appears in a response body.
+- Tokens are signed and verified with HS256 only. Tokens with `alg: none` or another secret are rejected. `JWT_SECRET` must be at least 32 characters, or the server won't start.
 - The JWT holds only the user id and role. The user is loaded again on every request, so deleted users and role changes take effect immediately.
+- Changing a password ends every session that started before the change (`passwordChangedAt`).
+- `POST /api/auth/logout` clears the cookie.
+
+**Passwords and login**
+
+- Passwords are hashed with bcrypt (cost 12) in a pre-save hook and are never returned (`select: false` plus a `toJSON` transform). They must be 8 to 72 bytes, because bcrypt ignores anything after 72 bytes.
+- Login returns the same error and takes the same time for an unknown email and a wrong password. An unknown email is still checked against a dummy hash, so response time doesn't reveal which emails exist.
+- Rate limits: 10 failed logins per IP per 15 minutes, and 30 registrations per IP per hour (`express-rate-limit`). Behind a reverse proxy, set Express `trust proxy` so the limit applies to the real client IP.
+
+**HTTP**
+
+- `helmet` sets security headers (`nosniff`, frame blocking, HSTS, a strict CSP for API responses) and removes `X-Powered-By`.
+- CORS allows only `CLIENT_URL`, with credentials. The frontend and API must be on the same site (for example `localhost` and `localhost`, or `app.example.com` and `api.example.com`) for the `SameSite=Strict` cookie to be sent.
+- JSON bodies are limited to 100 KB. The models cap lengths (name, email, note and post text, 20 interests of up to 50 characters each) and check email format.
+
+**Data access**
+
 - Request fields are checked to be strings before they reach a query, which blocks operator injection like `{ "email": { "$gt": "" } }`. Only known fields are copied from the body, so a user can't set their own role.
 - Admins can't delete themselves or remove their own admin role, so the app can't lose its last admin by accident.

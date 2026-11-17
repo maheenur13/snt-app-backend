@@ -16,18 +16,26 @@ const { Post } = await import('../src/models/Post.js');
 let server: Server;
 let baseUrl: string;
 
+// `token` is sent the way a browser would: as the auth cookie.
 async function call(path: string, token?: string, method = 'GET', body?: unknown) {
   const res = await fetch(baseUrl + path, {
     method,
-    headers: { 'Content-Type': 'application/json', ...(token && { Authorization: `Bearer ${token}` }) },
+    headers: { 'Content-Type': 'application/json', ...(token && { Cookie: `token=${token}` }) },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  return { status: res.status, data: res.status === 204 ? null : await res.json() };
+  const setCookie = res.headers.getSetCookie().find((c) => c.startsWith('token='));
+  return {
+    status: res.status,
+    data: res.status === 204 ? null : await res.json(),
+    headers: res.headers,
+    setCookie,
+    token: setCookie?.split(';')[0].slice('token='.length),
+  };
 }
 
 async function register(name: string, email: string) {
-  const { data } = await call('/auth/register', undefined, 'POST', { name, email, password: 'password123' });
-  return { token: data.token as string, id: data.user._id as string };
+  const res = await call('/auth/register', undefined, 'POST', { name, email, password: 'password123' });
+  return { token: res.token!, id: res.data.user._id as string };
 }
 
 before(async () => {
@@ -53,6 +61,7 @@ describe('auth', () => {
     });
     assert.equal(status, 201);
     assert.equal(data.user.password, undefined);
+    assert.equal(data.token, undefined, 'token only travels in the httpOnly cookie');
     const stored = await User.findOne({ email: 'ann@example.com' }).select('+password');
     assert.notEqual(stored!.password, 'password123');
   });
@@ -85,6 +94,56 @@ describe('auth', () => {
   test('requests without a valid token are rejected', async () => {
     assert.equal((await call('/notes')).status, 401);
     assert.equal((await call('/notes', 'not-a-token')).status, 401);
+  });
+
+  test('the auth cookie is httpOnly and SameSite=Strict', async () => {
+    const res = await call('/auth/login', undefined, 'POST', { email: 'ann@example.com', password: 'password123' });
+    assert.match(res.setCookie!, /HttpOnly/);
+    assert.match(res.setCookie!, /SameSite=Strict/);
+  });
+
+  test('tokens signed with another secret or algorithm are rejected', async () => {
+    const { default: jwt } = await import('jsonwebtoken');
+    const user = await User.findOne({ email: 'ann@example.com' });
+    const forged = jwt.sign({ role: 'admin' }, 'some-other-secret', { subject: user!.id });
+    assert.equal((await call('/users/me', forged)).status, 401);
+    const unsigned = jwt.sign({ role: 'admin' }, '', { subject: user!.id, algorithm: 'none' });
+    assert.equal((await call('/users/me', unsigned)).status, 401);
+  });
+
+  test('invalid input is rejected by the model', async () => {
+    const bad = (body: object) =>
+      call('/auth/register', undefined, 'POST', { name: 'X', password: 'password123', ...body });
+    assert.equal((await bad({ email: 'not-an-email' })).status, 400);
+    assert.equal((await bad({ email: 'long@example.com', password: 'a'.repeat(73) })).status, 400);
+    const { token } = await register('Many', 'many@example.com');
+    const tooMany = Array.from({ length: 21 }, (_, i) => `topic-${i}`);
+    assert.equal((await call('/users/me', token, 'PATCH', { interests: tooMany })).status, 400);
+  });
+
+  test('logout clears the cookie', async () => {
+    const res = await call('/auth/logout', undefined, 'POST');
+    assert.equal(res.status, 204);
+    assert.match(res.setCookie!, /Expires=Thu, 01 Jan 1970/);
+  });
+
+  test('security headers are set and CORS only allows the client origin', async () => {
+    const res = await call('/auth/logout', undefined, 'POST');
+    assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
+    assert.equal(res.headers.get('x-powered-by'), null);
+
+    const preflight = await fetch(`${baseUrl}/notes`, {
+      method: 'OPTIONS',
+      headers: { Origin: 'http://localhost:5173', 'Access-Control-Request-Method': 'GET' },
+    });
+    assert.equal(preflight.headers.get('access-control-allow-origin'), 'http://localhost:5173');
+    assert.equal(preflight.headers.get('access-control-allow-credentials'), 'true');
+
+    const evil = await fetch(`${baseUrl}/notes`, {
+      method: 'OPTIONS',
+      headers: { Origin: 'https://evil.example', 'Access-Control-Request-Method': 'GET' },
+    });
+    assert.notEqual(evil.headers.get('access-control-allow-origin'), 'https://evil.example');
   });
 });
 
@@ -146,7 +205,10 @@ describe('admin', () => {
     assert.equal((await call(`/users/${admin.id}`, admin.token, 'DELETE')).status, 400);
     assert.equal((await call(`/users/${admin.id}`, admin.token, 'PATCH', { role: 'user' })).status, 400);
 
+    // token times have 1-second precision, so make sure the change lands in a later second
+    await new Promise((resolve) => setTimeout(resolve, 1100));
     await call(`/users/${victim.id}`, admin.token, 'PATCH', { password: 'brand-new-pass' });
+    assert.equal((await call('/users/me', victim.token)).status, 401, 'password change ends old sessions');
     const login = await call('/auth/login', undefined, 'POST', {
       email: 'gone@example.com',
       password: 'brand-new-pass',
@@ -210,5 +272,17 @@ describe('indexes', () => {
       assert.match(text, /IXSCAN/);
       assert.doesNotMatch(text, /COLLSCAN/);
     }
+  });
+});
+
+// Last, because it uses up the login limit for this process.
+describe('rate limiting', () => {
+  test('repeated failed logins get 429', async () => {
+    let status = 0;
+    for (let i = 0; i < 12; i++) {
+      status = (await call('/auth/login', undefined, 'POST', { email: 'ann@example.com', password: 'wrong-pass' }))
+        .status;
+    }
+    assert.equal(status, 429);
   });
 });
