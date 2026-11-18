@@ -409,6 +409,16 @@ describe('demo admin', () => {
   });
 });
 
+describe('health', () => {
+  test('the root and /api answer 200 without a login', async () => {
+    for (const url of [baseUrl.replace(/\/api$/, '/'), baseUrl]) {
+      const res = await fetch(url);
+      assert.equal(res.status, 200);
+      assert.deepEqual(await res.json(), { success: true, data: { name: 'Secure Notes API', status: 'ok' } });
+    }
+  });
+});
+
 describe('config', () => {
   const valid = { MONGO_URI: 'mongodb://localhost/x', JWT_SECRET: 'x'.repeat(32) };
 

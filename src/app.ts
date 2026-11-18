@@ -10,6 +10,7 @@ import { authRouter } from './routes/auth.routes.js';
 import { notesRouter } from './routes/notes.routes.js';
 import { postsRouter } from './routes/posts.routes.js';
 import { usersRouter } from './routes/users.routes.js';
+import { sendData } from './utils/http.js';
 
 export const app = express();
 app.set('trust proxy', config.trustProxy);
@@ -37,6 +38,9 @@ app.use('/api/auth', authRouter);
 app.use('/api/notes', notesRouter);
 app.use('/api/posts', postsRouter);
 app.use('/api/users', usersRouter);
+
+// So opening the API URL in a browser shows it's up, instead of a 404. Also a health check for Render.
+app.get(['/', '/api'], (_req, res) => sendData(res, { name: 'Secure Notes API', status: 'ok' }));
 
 app.use(notFound);
 app.use(errorHandler);

@@ -121,6 +121,7 @@ List endpoints accept `?page=1&limit=10` (`limit` max 100). Missing or out-of-ra
 
 | Method | Path                     | Access        | Description                                         |
 | ------ | ------------------------ | ------------- | --------------------------------------------------- |
+| GET    | `/` and `/api`           | public        | Health check: `{ name, status: "ok" }`              |
 | POST   | `/api/auth/register`     | public        | `{ name, email, password }` → user + cookies        |
 | POST   | `/api/auth/login`        | public        | `{ email, password }` → user + cookies              |
 | POST   | `/api/auth/refresh`      | refresh token | Rotates the refresh token → user + cookies          |
